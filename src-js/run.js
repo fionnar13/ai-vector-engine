@@ -23,3 +23,7 @@ test('matrix numeric example', ()=>{
 });
 test('bbox union', ()=>{ const a=BBox.create(0,0,10,10); const b=BBox.create(5,5,15,15); const u=BBox.union(a,b); expect(u.minX===0&&u.maxX===15); });
 console.log(`Tests: ${total} total, ${passed} passed, ${failed} failed`);
+// PHASE E gate-integrity fix: without this the process exited 0 even with
+// failures, making the run.js gate in scripts/run-suite.sh decorative
+// (mirrors tests/geometry.test.js:62 and tests/run-js.js:49).
+if(failed>0) process.exit(1);

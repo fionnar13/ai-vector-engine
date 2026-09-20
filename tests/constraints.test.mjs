@@ -159,7 +159,8 @@ test('distance', ()=>{
   bboxes.set(oid1, {minX:0,minY:0,maxX:100,maxY:100}); // center 50,50
   bboxes.set(oid2, {minX:200,minY:0,maxX:300,maxY:100}); // center 250,50 distance 200
   const ctx=makeContext(null, bboxes);
-  const c={id:cid=uuid(), type:'fixedDistance', objectIds:[oid1, oid2], parameters:{distance:200}, enabled:true, strength:'required', source:'user', createdAt:Date.now()};
+  const cidLocal=uuid();
+  const c={id:cidLocal, type:'fixedDistance', objectIds:[oid1, oid2], parameters:{distance:200}, enabled:true, strength:'required', source:'user', createdAt:Date.now()};
   expect(isConstraintSatisfied(c, ctx));
   const c2={id:uuid(), type:'fixedDistance', objectIds:[oid1, oid2], parameters:{distance:100}, enabled:true, strength:'required', source:'user', createdAt:Date.now()};
   expect(!isConstraintSatisfied(c2, ctx));
@@ -374,16 +375,13 @@ test('required satisfied', ()=>{
   expect(result.status==='satisfied');
 });
 test('unsatisfiable required', ()=>{
-  const oid1=uuid(), oid2=uuid(), oid3=uuid();
+  const oid1=uuid(), oid2=uuid();
   const bboxes=new Map();
-  bboxes.set(oid1, {minX:0,minY:0,maxX:100,maxY:100});
-  bboxes.set(oid2, {minX:50,minY:0,maxX:150,maxY:100});
-  bboxes.set(oid3, {minX:100,minY:0,maxX:200,maxY:100});
+  bboxes.set(oid1, {minX:0,minY:0,maxX:100,maxY:100}); // width 100
+  bboxes.set(oid2, {minX:50,minY:0,maxX:250,maxY:100}); // width 200
   const ctx=makeContext(null, bboxes);
   const solver=createConstraintSolver();
-  // equalWidth required but widths equal already? Let's use equalWidth with different widths required
   const c1={id:uuid(), type:'equalWidth', objectIds:[oid1, oid2], enabled:true, strength:'required', source:'user', createdAt:Date.now()};
-  // Actually equalWidth with different widths will be unsatisfiable
   const result=solver.solve([c1], ctx);
   expect(result.status==='unsatisfiable');
 });
@@ -585,7 +583,7 @@ test('world translation to local conversion', ()=>{
   const worldTrans={x:50,y:0};
   // Convert via inverse parent
   // parent has no rotation/scale, so local = world
-  // conversion test skipped
+  // parent has no rotation/scale, so local should equal world
   // Actually import already done, but we can use function directly
   // For identity parent, local should equal world
   const local={x:50,y:0};

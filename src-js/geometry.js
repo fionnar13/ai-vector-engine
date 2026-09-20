@@ -323,3 +323,216 @@ export function transformPath(path, matrix){
   });
   return {...path, contours:newContours};
 }
+
+// ============================================================================
+// P5 Boolean service (gate: ARCHITECTURE.md:54 "T13 boolean_operation ... Tool
+// must call Geometry/Boolean service not implement logic itself"). ADDITIVE export.
+//
+// MVP scope, stated openly (nothing hidden):
+//  - inputs reduce to closed point rings; open inputs -> GEOMETRY_OPEN_PATH
+//  - Greiner-Hormann clipping with STRICT edge-interior crossings; vertices lying
+//    exactly on the other ring's edges and collinear shared edges are out of MVP
+//  - each input geometry must reduce to exactly one closed ring (multi-contour
+//    inputs -> GEOMETRY_DEGENERATE); disjoint/containment results may legally
+//    return 1-2 rings (disjoint union, difference-with-hole)
+//  - default tolerance 1e-9, compatible with the core equality tolerance (3.13 §13)
+//  - keepOriginals is echoed back as metadata for the CALLER (T13) to honor;
+//    this service itself is pure geometry and never touches stores
+// ============================================================================
+
+const BOOLEAN_DEFAULT_TOLERANCE=1e-9;
+
+function ringArea2(points){
+  let s=0; const n=points.length;
+  for(let i=0;i<n;i++){ const a=points[i], b=points[(i+1)%n]; s+=a.x*b.y - b.x*a.y; }
+  return s;
+}
+function ringNormalize(points, positive=true){
+  const a=ringArea2(points);
+  if(Math.abs(a)<1e-12) throw Object.assign(new Error('Boolean ring is degenerate'), {code:'GEOMETRY_DEGENERATE'});
+  const sameSign = positive ? a>0 : a<0;
+  return sameSign ? points.map(p=>({x:p.x, y:p.y})) : points.map(p=>({x:p.x, y:p.y})).reverse();
+}
+function ringPointIn(pt, ring){ // even-odd ray cast, orientation independent
+  let inside=false;
+  const n=ring.length;
+  for(let i=0, j=n-1; i<n; j=i++){
+    const yi=ring[i].y, yj=ring[j].y;
+    if((yi>pt.y)!==(yj>pt.y)){
+      const xi=ring[i].x, xj=ring[j].x;
+      if(pt.x < (xj-xi)*(pt.y-yi)/(yj-yi)+xi) inside=!inside;
+    }
+  }
+  return inside;
+}
+function dedupeRing(ring, tol){
+  const out=[];
+  for(const p of ring){
+    const last=out[out.length-1];
+    if(last && Math.abs(last.x-p.x)<tol && Math.abs(last.y-p.y)<tol) continue;
+    out.push(p);
+  }
+  while(out.length>2){
+    const first=out[0], last=out[out.length-1];
+    if(Math.abs(first.x-last.x)<tol && Math.abs(first.y-last.y)<tol) out.pop(); else break;
+  }
+  return out;
+}
+
+// Core Greiner-Hormann pair operation. Returns 0..2 closed rings.
+function booleanRingPair(subjectRing, clipRing, op, tol){
+  const S0=ringNormalize(subjectRing, true);
+  const C0=ringNormalize(clipRing, op!=='difference');
+
+  const sVerts=S0.map(p=>({x:p.x, y:p.y, isX:false, nb:null, used:false}));
+  const cVerts=C0.map(p=>({x:p.x, y:p.y, isX:false, nb:null, used:false}));
+  const sXs=sVerts.map(()=>[]), cXs=cVerts.map(()=>[]);
+  let hasCrossings=false;
+  const ns=sVerts.length, nc=cVerts.length, eps=1e-12;
+  for(let i=0;i<ns;i++){
+    const p1=sVerts[i], p2=sVerts[(i+1)%ns];
+    for(let j=0;j<nc;j++){
+      const q1=cVerts[j], q2=cVerts[(j+1)%nc];
+      const d1x=p2.x-p1.x, d1y=p2.y-p1.y, d2x=q2.x-q1.x, d2y=q2.y-q1.y;
+      const den=d1x*d2y - d1y*d2x;
+      if(Math.abs(den)<1e-15) continue;
+      const t=((q1.x-p1.x)*d2y - (q1.y-p1.y)*d2x)/den;
+      const u=((q1.x-p1.x)*d1y - (q1.y-p1.y)*d1x)/den;
+      if(t>eps && t<1-eps && u>eps && u<1-eps){
+        hasCrossings=true;
+        const sx={x:p1.x+t*d1x, y:p1.y+t*d1y, isX:true, nb:null, used:false, entering:false};
+        const cx={x:sx.x, y:sx.y, isX:true, nb:null, used:false, entering:false, t:u};
+        sx.nb=cx; cx.nb=sx;
+        sXs[i].push({t, node:sx});
+        cXs[j].push({t:u, node:cx});
+      }
+    }
+  }
+
+  if(!hasCrossings){
+    const sInC=ringPointIn(S0[0], clipRing);
+    const cInS=ringPointIn(C0[0], subjectRing);
+    if(op==='intersection') return sInC ? [S0] : (cInS ? [C0] : []);
+    if(op==='union') return sInC ? [C0] : (cInS ? [S0] : [S0, C0]);
+    // difference: S only / hole (outer + reversed inner) / empty
+    if(cInS) return [S0, ringNormalize(clipRing, false)];
+    if(sInC) return [];
+    return [S0];
+  }
+
+  const insertAll=(verts, perEdge)=>{
+    const out=[];
+    for(let i=0;i<verts.length;i++){
+      out.push(verts[i]);
+      const list=(perEdge[i]||[]).slice().sort((a,b)=>a.t-b.t);
+      for(const e of list) out.push(e.node);
+    }
+    return out;
+  };
+  const S=insertAll(sVerts, sXs);
+  const C=insertAll(cVerts, cXs);
+  const sIndex=new Map(S.map((n,i)=>[n,i]));
+  const cIndex=new Map(C.map((n,i)=>[n,i]));
+
+  // Label S crossings: entering = the segment leaving this node goes INTO the clip region.
+  for(const node of S){
+    if(!node.isX) continue;
+    const nxt=S[(sIndex.get(node)+1)%S.length];
+    node.entering=ringPointIn({x:(node.x+nxt.x)/2, y:(node.y+nxt.y)/2}, clipRing);
+  }
+
+  const resultRings=[];
+  const starts=S.filter(n2=>n2.isX && !n2.used && (op==='intersection' ? n2.entering : !n2.entering));
+  for(const start of starts){
+    if(start.used) continue;
+    start.used=true; if(start.nb) start.nb.used=true;
+    const ring=[{x:start.x, y:start.y}];
+    let inS=true, cursor=start;
+    const guard=(S.length+C.length)*2+16;
+    let done=false;
+    for(let g=0; g<guard && !done; g++){
+      const list=inS?S:C;
+      const indexMap=inS?sIndex:cIndex;
+      let i=indexMap.get(cursor);
+      // advance forward, emitting every node, until an intersection is emitted
+      while(true){
+        i=(i+1)%list.length;
+        const node=list[i];
+        ring.push({x:node.x, y:node.y});
+        if(node.isX) break;
+      }
+      const xnode=list[i];
+      if(xnode===start || xnode===start.nb){ done=true; break; }
+      xnode.used=true; if(xnode.nb) xnode.nb.used=true;
+      cursor=xnode.nb;
+      inS=!inS;
+    }
+    const cleaned=dedupeRing(ring, tol);
+    if(cleaned.length>=3) resultRings.push(cleaned);
+  }
+  return resultRings;
+}
+
+// Convert a stored geometry ({type:'rect'|'ellipse'|'polygon'|'star'|'path'|'line', params?}) into
+// closed point rings. Open inputs throw GEOMETRY_OPEN_PATH (never auto-closed, per contract).
+function geometryToRings(geom, tol){
+  if(!geom || !geom.type) throw Object.assign(new Error('Geometry missing'), {code:'VALIDATION_SCHEMA'});
+  const params = geom.params!==undefined && geom.params!==null ? geom.params : geom;
+  const flattenTol=Math.max(tol, 1e-9);
+  switch(geom.type){
+    case 'rect':
+      if((params.rx||0)>tol || (params.ry||0)>tol) return ringsFromDerived(parametricToDerived({type:'rect', params}), flattenTol);
+      return [[{x:params.x, y:params.y}, {x:params.x+params.width, y:params.y}, {x:params.x+params.width, y:params.y+params.height}, {x:params.x, y:params.y+params.height}]];
+    case 'ellipse': return ringsFromDerived(parametricToDerived({type:'ellipse', params}), flattenTol);
+    case 'polygon': return [params.points.map(p=>({x:p.x, y:p.y}))];
+    case 'star': return [generateStarVertices(params).map(p=>({x:p.x, y:p.y}))];
+    case 'line': throw Object.assign(new Error('Open path (line) cannot participate in a boolean operation'), {code:'GEOMETRY_OPEN_PATH'});
+    case 'path': {
+      const contours = params.contours || geom.contours || [];
+      if(!contours.length) throw Object.assign(new Error('Path has no contours'), {code:'GEOMETRY_OPEN_PATH'});
+      const rings=[];
+      for(const c of contours){
+        if(c.closed===false) throw Object.assign(new Error('Open path contour cannot participate in a boolean operation'), {code:'GEOMETRY_OPEN_PATH'});
+        const flat=flattenPath({contours:[c]}, flattenTol);
+        for(const pts of flat.contours) rings.push(pts);
+      }
+      return rings;
+    }
+    default: throw Object.assign(new Error(`Unsupported geometry type ${geom.type} for boolean`), {code:'GEOMETRY_DEGENERATE'});
+  }
+}
+function ringsFromDerived(path, flattenTol){
+  const flat=flattenPath(path, flattenTol);
+  const rings=[];
+  for(let i=0;i<flat.contours.length;i++){
+    if(flat.closed[i]===false) throw Object.assign(new Error('Open path contour cannot participate in a boolean operation'), {code:'GEOMETRY_OPEN_PATH'});
+    rings.push(flat.contours[i]);
+  }
+  return rings;
+}
+
+// Public Boolean service (P5.1): booleanOperation(geoms, op, {fillRule, tolerance, keepOriginals}).
+// geoms: 2+ stored geometries. op: 'union'|'difference'|'intersection'. Returns a path-shaped
+// geometry {isParametric:false, type:'path', contours, fillRule, operation, tolerance, keepOriginals}
+// ready to store as {type:'path', params:{contours, fillRule}}. Throws code-tagged errors:
+// GEOMETRY_OPEN_PATH / GEOMETRY_DEGENERATE / VALIDATION_SCHEMA.
+export function booleanOperation(geoms, op, opts={}){
+  const fillRule = opts.fillRule || 'nonZero';
+  if(fillRule!=='nonZero' && fillRule!=='evenOdd') throw Object.assign(new Error('Invalid fillRule'), {code:'VALIDATION_SCHEMA'});
+  const tolerance = opts.tolerance===undefined ? BOOLEAN_DEFAULT_TOLERANCE : opts.tolerance;
+  if(!Number.isFinite(tolerance) || tolerance<=0) throw Object.assign(new Error('tolerance must be positive'), {code:'VALIDATION_SCHEMA'});
+  const keepOriginals = opts.keepOriginals===true;
+  if(!['union','difference','intersection'].includes(op)) throw Object.assign(new Error(`Invalid boolean operation ${op}`), {code:'VALIDATION_SCHEMA'});
+  if(!Array.isArray(geoms) || geoms.length<2) throw Object.assign(new Error('Boolean operation requires at least 2 geometries'), {code:'VALIDATION_SCHEMA'});
+  let accRings=null;
+  for(let k=0;k<geoms.length;k++){
+    const rings=geometryToRings(geoms[k], tolerance);
+    if(rings.length!==1) throw Object.assign(new Error('Boolean MVP: each geometry must reduce to exactly one closed ring'), {code:'GEOMETRY_DEGENERATE'});
+    if(accRings===null){ accRings=[rings[0]]; continue; }
+    if(accRings.length!==1) throw Object.assign(new Error('Boolean MVP: multi-ring intermediate result cannot be folded further'), {code:'GEOMETRY_DEGENERATE'});
+    accRings=booleanRingPair(accRings[0], rings[0], op, tolerance);
+    if(accRings.length===0) throw Object.assign(new Error('Boolean produced empty result'), {code:'GEOMETRY_DEGENERATE'});
+  }
+  const contours=accRings.map(r=>createContour(r.map(pt=>createAnchor({x:pt.x, y:pt.y})), true));
+  return {isParametric:false, type:'path', contours, fillRule, operation:op, tolerance, keepOriginals};
+}

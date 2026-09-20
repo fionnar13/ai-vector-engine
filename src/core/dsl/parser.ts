@@ -12,7 +12,12 @@ export function parseDSL(input: unknown): ParseResult {
   let obj: unknown = input;
   if (typeof input === 'string') {
     try {
-      obj = JSON.parse(input);
+      obj = JSON.parse(input, (key, value) => {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+          throw new Error(`Dangerous key ${key} not allowed`);
+        }
+        return value;
+      });
     } catch (e: any) {
       errors.push(createError(DSLErrorCodes.PARSE_ERROR, `Invalid JSON: ${e.message}`, { error: e.message }));
       return { success: false, errors, warnings };

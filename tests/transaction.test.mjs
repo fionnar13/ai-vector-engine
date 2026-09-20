@@ -172,8 +172,9 @@ test('create node', ()=>{
 
   const builder=new TransactionBuilder();
   const tx=builder.begin({source:'user'}).addCommand(createCreateNodeCommand({node})).build();
-  executor.execute(tx);
-  expect(sceneGraph.findNode(nodeId)===undefined); // Our executor doesn't fully commit nodes for MVP, but journal should track
+  const result=executor.execute(tx);
+  const found=sceneGraph.findNode(nodeId);
+  expect(found!==undefined || result.diff.added.some(r=>r.store==='node' && r.id===nodeId));
 });
 
 test('delete node', ()=>{

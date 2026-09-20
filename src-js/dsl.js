@@ -46,6 +46,16 @@ export function validateSchema(input){
       errors.push(createError(DSLErrorCodes.SCHEMA_INVALID, `Instruction ${i} must be object`, {}, i));
       continue;
     }
+    // Prototype pollution check: if prototype is not Object.prototype
+    if(Object.getPrototypeOf(instr)!==Object.prototype && Object.getPrototypeOf(instr)!==null){
+      errors.push(createError(DSLErrorCodes.SCHEMA_INVALID, `Prototype pollution detected __proto__`, {}, i));
+      continue;
+    }
+    if(instr.args && typeof instr.args==='object' && Object.getPrototypeOf(instr.args)!==Object.prototype && Object.getPrototypeOf(instr.args)!==null){
+      errors.push(createError(DSLErrorCodes.SCHEMA_INVALID, `Prototype pollution detected in args __proto__`, {}, i));
+      continue;
+    }
+
     if(typeof instr.op!=='string' || !SUPPORTED_OPS.includes(instr.op)){
       errors.push(createError(DSLErrorCodes.INVALID_OPERATION, `Unknown operation ${instr.op}`, {op: instr.op}, i));
       continue;
@@ -163,8 +173,8 @@ export function validateSchema(input){
     }
     const dangerous=['__proto__','constructor','prototype','eval','Function','exec','import','require','process','fs','child_process'];
     for(const key of dangerous){
-      if(key in instr) errors.push(createError(DSLErrorCodes.SCHEMA_INVALID, `Dangerous field ${key} not allowed`, {field: key}, i));
-      if(instr.args && typeof instr.args==='object' && key in instr.args) errors.push(createError(DSLErrorCodes.SCHEMA_INVALID, `Dangerous field in args ${key} not allowed`, {field: key}, i));
+      if(Object.prototype.hasOwnProperty.call(instr, key)) errors.push(createError(DSLErrorCodes.SCHEMA_INVALID, `Dangerous field ${key} not allowed`, {field: key}, i));
+      if(instr.args && typeof instr.args==='object' && Object.prototype.hasOwnProperty.call(instr.args, key)) errors.push(createError(DSLErrorCodes.SCHEMA_INVALID, `Dangerous field in args ${key} not allowed`, {field: key}, i));
     }
   }
   const valid=errors.length===0;
@@ -176,7 +186,22 @@ export function parseDSL(input){
   const warnings=[];
   let obj=input;
   if(typeof input==='string'){
-    try { obj=JSON.parse(input); } catch(e){ errors.push(createError(DSLErrorCodes.PARSE_ERROR, `Invalid JSON: ${e.message}`, {error: e.message})); return {success:false, errors, warnings}; }
+    try {
+      obj=JSON.parse(input, (key, value)=> {
+        if(key==='__proto__' || key==='constructor' || key==='prototype'){
+          throw new Error(`Dangerous key ${key} not allowed`);
+        }
+        return value;
+      });
+    } catch(e){ errors.push(createError(DSLErrorCodes.PARSE_ERROR, `Invalid JSON: ${e.message}`, {error: e.message})); return {success:false, errors, warnings}; }
+  } else {
+    // For object input, check for prototype pollution via JSON stringify check
+    try {
+      const jsonStr=JSON.stringify(obj);
+      if(jsonStr.includes('"__proto__"') || jsonStr.includes('"constructor"')){
+        // Allow constructor as value but not as key? For simplicity, check via own property check with getOwnPropertyNames that includes __proto__? We already check hasOwnProperty for own keys, but JSON.parse pollution case is handled above
+      }
+    } catch{}
   }
   const schemaResult=validateSchema(obj);
   errors.push(...schemaResult.errors);
@@ -198,6 +223,7 @@ export function parseDSL(input){
 }
 
 export function analyzeReferences(program){
+  if(!program || !program.instructions) return {analysis:{defined:new Set(), used:new Set(), duplicateDefinitions:[], unknownReferences:[], forwardReferences:[], unusedReferences:[]}, errors:[], warnings:[]};
   const errors=[];
   const warnings=[];
   const defined=new Map();
@@ -338,7 +364,7 @@ export function mapToToolIR(node){
       let input;
       if(type==='rect'){
         toolId='T01';
-        input={x: args.x??0, y: args.y??0, width: args.width, height: args.height, rx: args.rx??0, ry: args.ry??0, fill: args.fill ? {kind:'solid', color: parseColor(args.fill)} : undefined};
+        input={x: args.x??0, y: args.y??0, width: args.width, height: args.height, rx: args.rx??0, ry: args.ry??0};
       } else if(type==='ellipse'){
         toolId='T02';
         input={cx: args.cx??args.x??0, cy: args.cy??args.y??0, rx: args.rx?? (args.width!==undefined? args.width/2 : 50), ry: args.ry?? (args.height!==undefined? args.height/2 : 50)};
@@ -353,6 +379,18 @@ export function mapToToolIR(node){
       } else {
         return {error: createError(DSLErrorCodes.COMPILE_FAILED, `Unsupported create type ${type}`, {type}, sourceIndex, sourceRef)};
       }
+      // PHASE E Decision 2 (create-with-fill): the create tool stays
+      // geometry-only; fill delivery decomposes to T07 (apply_fill), which owns
+      // the spec-shaped fill upsert (ARCHITECTURE.md:54). The T07 entry targets
+      // the created object through the existing DSLRef binding (DSLExecutor
+      // defines ref->objectId after each successful create, dsl.js:569-572).
+      if(args.fill!==undefined){
+        if(!node.ref){
+          return {error: createError(DSLErrorCodes.COMPILE_FAILED, 'create with fill requires an id (ref) so the fill can target the created object', {type}, sourceIndex, sourceRef)};
+        }
+        const fillIR={toolId:'T07', input:{objectIds:[], fill:{kind:'solid', color: parseColor(args.fill)}, opacity: args.opacity}, sourceInstructionIndex: sourceIndex, sourceRef: node.ref, targets: [node.ref], category:'mutation'};
+        return {ir:[{toolId, input, sourceInstructionIndex: sourceIndex, sourceRef, category:'mutation'}, fillIR]};
+      }
       return {ir:{toolId, input, sourceInstructionIndex: sourceIndex, sourceRef, category:'mutation'}};
     }
     case 'text': {
@@ -364,7 +402,12 @@ export function mapToToolIR(node){
       if(args.fill!==undefined || args.opacity!==undefined || args.stroke!==undefined){
         return {ir:{toolId:'T07', input:{objectIds:[], fill: args.fill? {kind:'solid', color: parseColor(args.fill)}:undefined, opacity: args.opacity}, sourceInstructionIndex: sourceIndex, sourceRef: node.target, targets: node.target? [node.target] : node.targets, category:'mutation'}};
       }
-      return {ir:{toolId:'T05', input:{objectIds:[], delta:{x:0,y:0}, updateArgs: args}, sourceInstructionIndex: sourceIndex, sourceRef: node.target, targets: node.target? [node.target] : node.targets, category:'mutation'}};
+      // PHASE E Decision 3 (honest failure > silent no-op): any update that is
+      // not appearance-only used to map to T05 with a zero delta + updateArgs
+      // that T05 never read (silent no-op reporting success:true). The DSL now
+      // rejects it at compile time; geometry changes must go through the
+      // transform op (T05/T06) or a dedicated tool invocation.
+      return {error: createError(DSLErrorCodes.COMPILE_FAILED, 'geometry fields not supported in update; use transform op or a dedicated tool invocation', {args}, sourceIndex, node.target)};
     }
     case 'delete': {
       return {ir:{toolId:'T04', input:{objectIds:[]}, sourceInstructionIndex: sourceIndex, targets: node.targets, category:'mutation'}};
@@ -436,7 +479,12 @@ export function compileToIR(program){
   for(const node of program.instructions){
     const result=mapToToolIR(node);
     if(result.error) errors.push(result.error);
-    else if(result.ir) ir.push(result.ir);
+    else if(result.ir){
+      // PHASE E Decision 2: one instruction may decompose into multiple tool
+      // IR entries (create-with-fill -> <create tool> + T07).
+      if(Array.isArray(result.ir)) ir.push(...result.ir);
+      else ir.push(result.ir);
+    }
   }
   const success=errors.length===0;
   return {success, ir: success? ir : undefined, program, errors, warnings};
@@ -502,6 +550,11 @@ export class DSLExecutor {
           const actual=env.resolve(ref);
           if(!actual){
             errors.push(createError(DSLErrorCodes.UNKNOWN_REFERENCE, `Unknown reference ${ref} at IR ${i}`, {ref, irIndex: i}, toolIR.sourceInstructionIndex, ref));
+            // Rollback on unknown reference
+            for(let ri=createdObjectIds.length-1; ri>=0; ri--){
+              const oid=createdObjectIds[ri];
+              try { context.toolRegistry.execute('T04', {objectIds:[oid]}, context.documentContext); } catch { try { if(context.documentContext.objectStore && context.documentContext.objectStore.delete) context.documentContext.objectStore.delete(oid); } catch {} }
+            }
             return {success:false, outputs, errors, warnings, ir};
           }
           resolvedObjectIds.push(actual);
@@ -517,8 +570,20 @@ export class DSLExecutor {
         const result=context.toolRegistry.execute(toolIR.toolId, resolvedInput, context.documentContext);
         if(!result.success){
           errors.push(createError(DSLErrorCodes.EXECUTION_FAILED, `Tool ${toolIR.toolId} failed: ${result.errors?.[0]?.message||'unknown'}`, {toolId: toolIR.toolId, errors: result.errors, irIndex: i}, toolIR.sourceInstructionIndex));
-          for(const oid of createdObjectIds){
-            try { context.toolRegistry.execute('T04', {objectIds:[oid]}, context.documentContext); } catch {}
+          // Rollback: delete all created objects in reverse order
+          for(let ri=createdObjectIds.length-1; ri>=0; ri--){
+            const oid=createdObjectIds[ri];
+            try {
+              const delRes=context.toolRegistry.execute('T04', {objectIds:[oid]}, context.documentContext);
+              if(!delRes.success){
+                // Fallback direct delete if tool fails
+                if(context.documentContext.objectStore && context.documentContext.objectStore.delete){
+                  try { context.documentContext.objectStore.delete(oid); } catch {}
+                }
+              }
+            } catch {
+              try { if(context.documentContext.objectStore && context.documentContext.objectStore.delete) context.documentContext.objectStore.delete(oid); } catch {}
+            }
           }
           return {success:false, outputs, errors, warnings, ir};
         }
@@ -537,8 +602,9 @@ export class DSLExecutor {
         }
       } catch(e){
         errors.push(createError(DSLErrorCodes.EXECUTION_FAILED, `Exception executing tool ${toolIR.toolId}: ${e.message}`, {toolId: toolIR.toolId, error: e.message, irIndex: i}, toolIR.sourceInstructionIndex));
-        for(const oid of createdObjectIds){
-          try { context.toolRegistry.execute('T04', {objectIds:[oid]}, context.documentContext); } catch {}
+        for(let ri=createdObjectIds.length-1; ri>=0; ri--){
+          const oid=createdObjectIds[ri];
+          try { context.toolRegistry.execute('T04', {objectIds:[oid]}, context.documentContext); } catch { try { if(context.documentContext.objectStore && context.documentContext.objectStore.delete) context.documentContext.objectStore.delete(oid); } catch {} }
         }
         return {success:false, outputs, errors, warnings, ir};
       }

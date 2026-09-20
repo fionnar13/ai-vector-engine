@@ -4,11 +4,19 @@ import { GeometryStore, AppearanceStore, ObjectStore } from '../src-js/stores.js
 import { SceneGraph } from '../src-js/scenegraph.js';
 import { SemanticStore } from '../src-js/semantic.js';
 import { createCoreToolRegistry } from '../src-js/tools.js';
+import { EventBus, HistoryManager, TransactionExecutor } from '../src-js/transaction.js';
 
 function uuid(){ return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c=>{const r=Math.random()*16|0; const v=c==='x'?r:(r&0x3|0x8); return v.toString(16);}); }
 
 let total=0, passed=0, failed=0;
-function test(name, fn){ total++; try{ fn(); passed++; console.log(`✓ ${name}`);}catch(e){ failed++; console.error(`✗ ${name}: ${e.message}\n${e.stack}`);} }
+// PHASE D harness correction (disclosed): test() previously did not await async
+// test bodies — async assertion failures surfaced as unhandled rejections that
+// crashed the process (exit 1) while the summary still counted them as passed.
+// Fixed so the D.1.3 substrate assertions are counted by the file's own
+// pass/fail protocol (pre-existing flaw; the 3 pre-existing async tests
+// relied on crash-loud behavior).
+const pending=[];
+function test(name, fn){ total++; try{ const r=fn(); if(r&&typeof r.then==='function'){ pending.push(r.then(()=>{passed++; console.log(`✓ ${name}`);}, e=>{failed++; console.error(`✗ ${name}: ${e.message}\n${e.stack}`);})); } else { passed++; console.log(`✓ ${name}`);} }catch(e){ failed++; console.error(`✗ ${name}: ${e.message}\n${e.stack}`);} }
 function expect(c,msg){ if(!c) throw new Error(msg||'expect failed'); }
 
 function createDoc(){
@@ -18,6 +26,18 @@ function createDoc(){
   const sceneGraph=new SceneGraph();
   const semanticStore=new SemanticStore();
   return {geometryStore, appearanceStore, objectStore, sceneGraph, semanticStore};
+}
+
+// PHASE D wiring (D.1.2/D.1.3): substrate for DSL hosts. Mirrors tools.test.mjs
+// makeSubstrate: the host builds TransactionExecutor and passes it INSIDE
+// documentContext; dsl.js's existing pass-through (src-js/dsl.js:548) then hands
+// it to ToolRegistry.execute, whose substrate gate (tools.js:1044/:1069) routes
+// every category:'mutation' tool through Command -> Transaction -> Commit.
+function makeSubstrate(doc){
+  const eventBus=new EventBus();
+  const history=new HistoryManager();
+  const transactionManager=new TransactionExecutor(doc, eventBus, history);
+  return {eventBus, history, transactionManager};
 }
 
 console.log('=== Parser Tests ===');
@@ -264,6 +284,56 @@ test('update', ()=>{
   ]};
   const parse=parseDSL(input);
   expect(parse.success);
+  // PHASE E Decision 3: geometry-field updates are rejected at compile time
+  // (honest failure) instead of compiling to a silent T05 no-op that reported
+  // success:true while changing nothing (the D.2 audit finding).
+  const compile=compileDSL(parse.program);
+  expect(!compile.success, 'update width:300 must not compile');
+  expect(compile.errors.length>0 && compile.errors[0].code==='DSL_COMPILE_FAILED', `code=${compile.errors[0] && compile.errors[0].code}`);
+  expect(compile.errors[0].message.includes('geometry fields not supported in update'), `msg=${compile.errors[0] && compile.errors[0].message}`);
+});
+test('update geometry fields rejected at compile', ()=>{
+  const input={version:'1.0', program:[
+    {op:'create', type:'rect', id:'r', args:{width:200, height:100}},
+    {op:'update', target:'r', args:{x:50, height:300, rx:8}}
+  ]};
+  const parse=parseDSL(input);
+  expect(parse.success);
+  const compile=compileDSL(parse.program);
+  expect(!compile.success, 'multi-field geometry update must not compile');
+  expect(compile.errors.some(e=> e.code==='DSL_COMPILE_FAILED' && e.message.includes('geometry fields not supported in update')));
+});
+test('update fill still routes to T07 (appearance path unchanged)', async ()=>{
+  const doc=createDoc();
+  const registry=createCoreToolRegistry();
+  const substrate=makeSubstrate(doc);
+  const docContext={objectStore: doc.objectStore, geometryStore: doc.geometryStore, appearanceStore: doc.appearanceStore, sceneGraph: doc.sceneGraph, semanticStore: doc.semanticStore, transactionManager: substrate.transactionManager};
+  const input={version:'1.0', program:[
+    {op:'create', type:'rect', id:'r', args:{width:200, height:100}},
+    {op:'update', target:'r', args:{fill:'#00FF00'}}
+  ]};
+  const parse=parseDSL(input);
+  expect(parse.success);
+  const validation=validateDSL(parse.program);
+  expect(validation.valid, `validation failed ${JSON.stringify(validation.errors)}`);
+  const compile=compileDSL(parse.program);
+  expect(compile.success, `compile failed ${JSON.stringify(compile.errors)}`);
+  expect(compile.ir.length===2);
+  expect(compile.ir[0].toolId==='T01');
+  expect(compile.ir[1].toolId==='T07');
+  const executor=new DSLExecutor();
+  const result=await executor.execute(compile.ir, {toolRegistry: registry, documentContext: docContext});
+  expect(result.success, `execution failed ${JSON.stringify(result.errors)}`);
+  expect(doc.objectStore.size()===1);
+  const obj=doc.objectStore.get(result.outputs[0].output.objectId);
+  const app=doc.appearanceStore.get(obj.appearanceRef);
+  expect(app.stack.length===1, `stack=${JSON.stringify(app.stack)}`);
+  expect(app.stack[0].type==='fill');
+  expect(app.stack[0].data.kind==='solid');
+  expect(app.stack[0].data.color.r===0 && app.stack[0].data.color.g===255 && app.stack[0].data.color.b===0, `color=${JSON.stringify(app.stack[0].data.color)}`);
+  const geom=doc.geometryStore.get(obj.geometryRef);
+  expect(geom.params.width===200 && geom.params.height===100, 'fill update must not touch geometry');
+  expect(substrate.history.size()===2, `history.size()=${substrate.history.size()} (expected 2: T01,T07)`);
 });
 test('delete', ()=>{
   const input={version:'1.0', program:[
@@ -469,7 +539,8 @@ console.log('\n=== Critical: Rollback Test ===');
 test('rollback on failure atomicity', async ()=>{
   const doc=createDoc();
   const registry=createCoreToolRegistry();
-  const docContext={objectStore: doc.objectStore, geometryStore: doc.geometryStore, appearanceStore: doc.appearanceStore, sceneGraph: doc.sceneGraph, semanticStore: doc.semanticStore};
+  const substrate=makeSubstrate(doc);
+  const docContext={objectStore: doc.objectStore, geometryStore: doc.geometryStore, appearanceStore: doc.appearanceStore, sceneGraph: doc.sceneGraph, semanticStore: doc.semanticStore, transactionManager: substrate.transactionManager};
 
   const input={version:'1.0', program:[
     {op:'create', type:'rect', id:'A', args:{width:100, height:100}},
@@ -499,11 +570,15 @@ test('rollback on failure atomicity', async ()=>{
   const result=await executor.execute(compile2.ir, {toolRegistry: registry, documentContext: docContext});
   expect(result.success);
   expect(doc.objectStore.size()===beforeCount+2);
+  // PHASE D wiring: T01+T01+T05 each commit one substrate transaction
+  expect(substrate.history.size()===3, `history.size()=${substrate.history.size()} (expected 3)`);
+  expect(substrate.history.getAll().every(t=>t.status==='committed'));
 
   // Now test rollback: create A, B, then fail on third
   const doc2=createDoc();
   const registry2=createCoreToolRegistry();
-  const docContext2={objectStore: doc2.objectStore, geometryStore: doc2.geometryStore, appearanceStore: doc2.appearanceStore, sceneGraph: doc2.sceneGraph, semanticStore: doc2.semanticStore};
+  const substrate2=makeSubstrate(doc2);
+  const docContext2={objectStore: doc2.objectStore, geometryStore: doc2.geometryStore, appearanceStore: doc2.appearanceStore, sceneGraph: doc2.sceneGraph, semanticStore: doc2.semanticStore, transactionManager: substrate2.transactionManager};
   const ir=[
     {toolId:'T01', input:{x:0,y:0,width:100,height:100,rx:0,ry:0}, sourceInstructionIndex:0, sourceRef:'A', category:'mutation'},
     {toolId:'T01', input:{x:0,y:0,width:100,height:100,rx:0,ry:0}, sourceInstructionIndex:1, sourceRef:'B', category:'mutation'},
@@ -514,13 +589,18 @@ test('rollback on failure atomicity', async ()=>{
   expect(!result2.success);
   // After rollback, no partial state
   expect(doc2.objectStore.size()===0);
+  // PHASE D wiring: T01+T01 committed; dsl.js rollback then deletes both created
+  // objects via T04, which ALSO routes through the substrate (2 more commits).
+  expect(substrate2.history.size()===4, `history.size()=${substrate2.history.size()} (expected 4: T01,T01,T04,T04)`);
+  expect(substrate2.history.getAll().every(t=>t.status==='committed'));
 });
 
 console.log('\n=== Critical: Vertical Slice ===');
 test('vertical slice create red 200x100 rx12 and center', async ()=>{
   const doc=createDoc();
   const registry=createCoreToolRegistry();
-  const docContext={objectStore: doc.objectStore, geometryStore: doc.geometryStore, appearanceStore: doc.appearanceStore, sceneGraph: doc.sceneGraph, semanticStore: doc.semanticStore};
+  const substrate=makeSubstrate(doc);
+  const docContext={objectStore: doc.objectStore, geometryStore: doc.geometryStore, appearanceStore: doc.appearanceStore, sceneGraph: doc.sceneGraph, semanticStore: doc.semanticStore, transactionManager: substrate.transactionManager};
 
   const input={
     version:'1.0',
@@ -536,9 +616,12 @@ test('vertical slice create red 200x100 rx12 and center', async ()=>{
   expect(validation.valid, `validation failed ${JSON.stringify(validation.errors)}`);
   const compile=compileDSL(parse.program);
   expect(compile.success, `compile failed ${JSON.stringify(compile.errors)}`);
-  expect(compile.ir.length===2);
+  // PHASE E Decision 2: the create-with-fill instruction decomposes into
+  // T01 (geometry) + T07 (fill delivery via the DSLRef binding); align stays T08.
+  expect(compile.ir.length===3);
   expect(compile.ir[0].toolId==='T01');
-  expect(compile.ir[1].toolId==='T08');
+  expect(compile.ir[1].toolId==='T07');
+  expect(compile.ir[2].toolId==='T08');
 
   const executor=new DSLExecutor();
   const result=await executor.execute(compile.ir, {toolRegistry: registry, documentContext: docContext});
@@ -553,6 +636,39 @@ test('vertical slice create red 200x100 rx12 and center', async ()=>{
   expect(geom.params.width===200);
   expect(geom.params.height===100);
   expect(geom.params.rx===12);
+  // PHASE E Decision 2: the fill is now DELIVERED. Before this change the
+  // committed appearance stack was [] despite fill:'#FF0000' (silent drop,
+  // D.2 audit finding). The T07-decomposed upsert must produce exactly one
+  // spec-shaped fill item.
+  const app=doc.appearanceStore.get(obj.appearanceRef);
+  expect(app.stack.length===1, `stack=${JSON.stringify(app.stack)}`);
+  expect(app.stack[0].type==='fill');
+  expect(app.stack[0].enabled===true);
+  expect(app.stack[0].data.kind==='solid');
+  expect(app.stack[0].data.color.r===255 && app.stack[0].data.color.g===0 && app.stack[0].data.color.b===0 && app.stack[0].data.color.a===1, `color=${JSON.stringify(app.stack[0].data.color)}`);
+  expect(app.stack[0].data.opacity===1);
+  // PHASE D (D.1.3) + PHASE E (Decision 2): prove the substrate path was taken
+  // AND that the decomposed fill delivery commits in its own transaction.
+  // Three mutation commits for the two-instruction program:
+  //   tx#1 T01 create rect   -> diff.added = [geometry, appearance, object, node] (4)
+  //   tx#2 T07 fill delivery -> diff.modified = [appearance record] (1)
+  //   tx#3 T08 align both/center on ONE object -> no-op success, empty-diff commit
+  expect(substrate.history.size()===3, `history.size()=${substrate.history.size()} (expected 3: T01,T07,T08)`);
+  const txs=substrate.history.getAll();
+  expect(txs[0].status==='committed');
+  expect(txs[0].diff.added.length===4, `tx#1 diff.added=${txs[0].diff.added.length} (expected 4)`);
+  expect(txs[1].status==='committed');
+  expect(txs[1].diff.added.length===0 && txs[1].diff.removed.length===0, 'tx#2 (T07 fill) must only modify');
+  expect(txs[1].diff.modified.length===1, `tx#2 diff.modified=${txs[1].diff.modified.length} (expected 1: appearance record)`);
+  expect(txs[2].status==='committed');
+  expect(txs[2].diff.added.length===0 && txs[2].diff.removed.length===0 && txs[2].diff.modified.length===0, 'tx#3 (no-op align) expected empty diff');
+  expect(result.outputs[0].transactionId && result.outputs[0].commandId, 'T01 output must carry substrate ids');
+  expect(result.outputs[1].transactionId && result.outputs[1].commandId, 'T07 output must carry substrate ids');
+  expect(result.outputs[2].transactionId && result.outputs[2].commandId, 'T08 output must carry substrate ids');
+  // Event composition (probe-verified): T01 ObjectCreated + 3x TransactionCommitted
+  // (T07 appearance-only modify emits no domain event, only its commit).
+  expect(substrate.eventBus.getHistory().length===4, `events=${substrate.eventBus.getHistory().length} (expected 4)`);
+  expect(substrate.eventBus.getHistory()[0].type==='ObjectCreated');
 });
 
 console.log('\n=== Security ===');
@@ -582,5 +698,7 @@ test('deterministic compile', ()=>{
   expect(JSON.stringify(compile1.ir.map(i=> i.toolId))===JSON.stringify(compile2.ir.map(i=> i.toolId)));
 });
 
-console.log(`\nTests: ${total} total, ${passed} passed, ${failed} failed`);
-if(failed>0) process.exit(1);
+Promise.all(pending).then(()=>{
+  console.log(`\nTests: ${total} total, ${passed} passed, ${failed} failed`);
+  if(failed>0) process.exit(1);
+});

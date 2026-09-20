@@ -1,0 +1,21 @@
+# PHASE E item 4: run the full regression suite on every push.
+# No install step: the repo has zero runtime/dev dependencies, and
+# "npm test" only needs node + bash (see scripts/run-suite.sh).
+name: CI
+
+on: [push]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Run full test suite
+        run: npm test

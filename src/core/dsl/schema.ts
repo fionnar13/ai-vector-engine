@@ -45,6 +45,15 @@ export function validateSchema(input: unknown): { valid: boolean; errors: DSLErr
       errors.push(createError(DSLErrorCodes.SCHEMA_INVALID, `Instruction ${i} must be object`, {}, i));
       continue;
     }
+    if (Object.getPrototypeOf(instr) !== Object.prototype && Object.getPrototypeOf(instr) !== null) {
+      errors.push(createError(DSLErrorCodes.SCHEMA_INVALID, `Prototype pollution detected __proto__`, {}, i));
+      continue;
+    }
+    if (instr.args && typeof instr.args === 'object' && Object.getPrototypeOf(instr.args) !== Object.prototype && Object.getPrototypeOf(instr.args) !== null) {
+      errors.push(createError(DSLErrorCodes.SCHEMA_INVALID, `Prototype pollution detected in args __proto__`, {}, i));
+      continue;
+    }
+
 
     if (typeof instr.op !== 'string' || !SUPPORTED_OPS.includes(instr.op as DSLOp)) {
       errors.push(createError(DSLErrorCodes.INVALID_OPERATION, `Unknown operation ${instr.op}`, { op: instr.op }, i));
@@ -298,10 +307,10 @@ export function validateSchema(input: unknown): { valid: boolean; errors: DSLErr
     // Security: reject fields that attempt to inject executable code
     const dangerousKeys = ['__proto__', 'constructor', 'prototype', 'eval', 'Function', 'exec', 'import', 'require', 'process', 'fs', 'child_process'];
     for (const key of dangerousKeys) {
-      if (key in instr) {
+      if (Object.prototype.hasOwnProperty.call(instr, key)) {
         errors.push(createError(DSLErrorCodes.SCHEMA_INVALID, `Dangerous field ${key} not allowed`, { field: key }, i));
       }
-      if (instr.args && typeof instr.args === 'object' && key in (instr.args as any)) {
+      if (instr.args && typeof instr.args === 'object' && Object.prototype.hasOwnProperty.call(instr.args as any, key)) {
         errors.push(createError(DSLErrorCodes.SCHEMA_INVALID, `Dangerous field in args ${key} not allowed`, { field: key }, i));
       }
     }
