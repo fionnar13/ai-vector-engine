@@ -1156,11 +1156,17 @@ export class InteractionEngine {
   }
   handleTransformCommit(result){
     if(!result.matrix) return;
-    const previewTransforms=this.transformManager.getPreviewTransforms();
+    // F-1 fix (second instance): endTransform() resets transformManager state
+    // before this handler runs, so getPreviewTransforms() returns an empty map
+    // here. result.matrix IS the pre-reset previewMatrix snapshot (captured in
+    // endTransform before reset), and the active path computes
+    // multiplyMatrix(previewMatrix, initial) (TransformInteractionManager
+    // .getPreviewTransforms) — using result.matrix is mathematically identical
+    // for every mode (move/scale/rotate).
     if(this.callbacks.onTransaction){
       const commands=[];
       for(const [nodeId, initial] of result.initialTransforms){
-        const preview=previewTransforms.get(nodeId)||initial;
+        const preview=multiplyMatrix(result.matrix, initial);
         commands.push({ type:'SetLocalTransform', payload:{ nodeId, transform:preview, initialTransform:initial } });
       }
       const transaction={ id:'tx-'+Math.random().toString(36).slice(2), commands, source:'user', timestamp:Date.now() };
@@ -1214,11 +1220,14 @@ export class InteractionEngine {
   }
   handleDragCommit(result){
     if(Math.hypot(result.delta.x,result.delta.y)<1e-6) return;
-    const previewTransforms=this.dragManager.getPreviewTransforms();
+    // F-1 fix: endDrag() resets dragManager state before this handler runs, so
+    // getPreviewTransforms() returns an empty map here. Compute the committed
+    // preview from result.delta instead (same math as DragManager during drag:
+    // multiplyMatrix(translationMatrix(delta), initial) === {...initial, tx+dx, ty+dy}).
     if(this.callbacks.onTransaction){
       const commands=[];
       for(const [nodeId, initial] of result.initialTransforms){
-        const preview=previewTransforms.get(nodeId)||initial;
+        const preview={ ...initial, tx:initial.tx+result.delta.x, ty:initial.ty+result.delta.y };
         commands.push({ type:'SetLocalTransform', payload:{ nodeId, transform:preview, initialTransform:initial, delta:result.delta } });
       }
       const transaction={ id:'tx-'+Math.random().toString(36).slice(2), commands, source:'user', timestamp:Date.now() };

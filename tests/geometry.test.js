@@ -11,7 +11,7 @@ function expectVecClose(a,b,tol=1e-6){ if(Math.hypot(a.x-b.x,a.y-b.y)>tol) throw
 
 test('rect normal', ()=>{ const r=G.createRect({x:0,y:0,width:200,height:100,rx:0,ry:0}); expect(r.params.width===200); const bb=G.rectBBox ? {minX:r.params.x,minY:r.params.y,maxX:r.params.x+r.params.width,maxY:r.params.y+r.params.height} : null; expect(bb.maxX===200); });
 test('rect rounded radius normalization', ()=>{ const r=G.createRect({x:0,y:0,width:100,height:50,rx:100,ry:100}); expect(r.params.rx===50); expect(r.params.ry===25); });
-test('rect degenerate', ()=>{ const r=G.createRect({x:0,y:0,width:0,height:100,rx:0,ry:0}); expect(G.isDegenerateRect ? false : true || r.params.width===0); });
+test('rect degenerate allowed', ()=>{ const r=G.createRect({x:0,y:0,width:0,height:100,rx:0,ry:0}); expect(r.params.width===0); });
 test('ellipse bbox', ()=>{ const e=G.createEllipse({cx:100,cy:100,rx:50,ry:30}); const bb={minX:e.params.cx-e.params.rx, minY:e.params.cy-e.params.ry, maxX:e.params.cx+e.params.rx, maxY:e.params.cy+e.params.ry}; expect(bb.minX===50 && bb.maxX===150); });
 test('ellipse degenerate', ()=>{ const e=G.createEllipse({cx:0,cy:0,rx:0,ry:10}); expect(e.params.rx===0); });
 test('ellipse to path anchors', ()=>{ const e=G.createEllipse({cx:0,cy:0,rx:10,ry:10}); const path=G.parametricToDerived(e); expect(path.contours[0].anchors.length===4); });

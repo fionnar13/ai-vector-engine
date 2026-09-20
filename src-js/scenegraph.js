@@ -189,6 +189,7 @@ export class SceneGraph {
   }
   getParent(nodeId){ const n=this.nodes.get(nodeId); if(!n||!n.parent) return undefined; return this.findNode(n.parent); }
   getChildren(nodeId){ const n=this.nodes.get(nodeId); if(!n) throw new Error(`SCENE_NODE_NOT_FOUND: ${nodeId}`); return n.children.map(cid=>this.findNode(cid)).filter(Boolean); }
+  getRoots(){ return this.getRootNodes(); }
   getRootNodes(){ const roots=[]; for(const node of this.nodes.values()){ if(node.parent===null) roots.push(cloneForPublic(node)); } return roots; }
   isAncestor(ancestorId, nodeId){ return isAncestor(this.nodes, ancestorId, nodeId); }
   isDescendant(nodeId, ancestorId){ return isAncestor(this.nodes, ancestorId, nodeId); }
