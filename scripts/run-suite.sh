@@ -2,7 +2,7 @@
 # Full-suite regression battery — npm test entry point (PHASE E item 1).
 #
 # Protocol identical to the PHASE A-D reconciliation runner:
-#   counted: 14 node:test .mjs files (the 546-test subtotal; run-js.js adds 22 -> 568)
+#   counted: 15 node:test .mjs files (PHASE 3.13 adds tests/ai.test.mjs; run-js.js adds 22)
 #   gates:   tests/geometry.test.js, tests/architecture.test.mjs,
 #            tests/architecture-phase3.04.mjs, tests/run-js.js,
 #            src-js/run.js (dsl vertical slice)
@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 
 TOTAL=0; PASSED=0; FAILED=0; RC=0
 
-FILES="tests/appearance-graph.test.mjs tests/appearance.test.mjs tests/constraints.test.mjs tests/dsl.test.mjs tests/geometry.test.mjs tests/interaction-boundaries.test.mjs tests/interaction.test.mjs tests/renderer.test.mjs tests/scenegraph.test.mjs tests/semantic.test.mjs tests/spatial-index.test.mjs tests/stores.test.mjs tests/tools.test.mjs tests/transaction.test.mjs"
+FILES="tests/ai.test.mjs tests/appearance-graph.test.mjs tests/appearance.test.mjs tests/constraints.test.mjs tests/dsl.test.mjs tests/geometry.test.mjs tests/interaction-boundaries.test.mjs tests/interaction.test.mjs tests/renderer.test.mjs tests/scenegraph.test.mjs tests/semantic.test.mjs tests/spatial-index.test.mjs tests/stores.test.mjs tests/tools.test.mjs tests/transaction.test.mjs"
 
 for f in $FILES; do
   raw=$(node "$f" 2>&1)

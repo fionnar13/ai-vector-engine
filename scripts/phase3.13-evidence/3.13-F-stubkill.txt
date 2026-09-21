@@ -1,0 +1,21 @@
+== pre-kill hash ==
+0bfc6245337a5ac9d5b53dd076d565b8173fc91b6601093c5598d209d97231bb
+== KILL 1 applied ==
+== KILL 1 run ==
+✗ F-S3: DURING EXECUTION — Plan->DSL->Tool Registry->tool validation->Transaction->Commit through the REAL substrate: history grows by exactly the executed step count, TransactionCommitted emitted per commit: history.size() increased by the expected number (one substrate transaction per executed plan step): 0 !== 3
+✗ F-S4: AFTER COMMIT — object/geometry/appearance final state, WorldBBox center === artboard center (1e-9), SpatialIndex + RenderTree invalidated: SpatialIndex invalidated AFTER commit (one invalidation per committed transaction): 0 !== 3
+Tests: 125 total, 123 passed, 2 failed
+kill1 exit: 1 (expect 1)
+RESTORE OK (0bfc6245337a5ac9d5b53dd076d565b8173fc91b6601093c5598d209d97231bb)
+== KILL 2 applied ==
+== KILL 2 run ==
+✗ F-S3: DURING EXECUTION — Plan->DSL->Tool Registry->tool validation->Transaction->Commit through the REAL substrate: history grows by exactly the executed step count, TransactionCommitted emitted per commit: history.size() increased by the expected number (one substrate transaction per executed plan step): 1 !== 3
+✗ F-S4: AFTER COMMIT — object/geometry/appearance final state, WorldBBox center === artboard center (1e-9), SpatialIndex + RenderTree invalidated: AppearanceStore.get(object.appearanceRef).stack contains a fill item
+Tests: 125 total, 123 passed, 2 failed
+kill2 exit: 1 (expect 1)
+RESTORE OK (0bfc6245337a5ac9d5b53dd076d565b8173fc91b6601093c5598d209d97231bb)
+== post-restore run ==
+
+Tests: 125 total, 125 passed, 0 failed
+post-restore exit: 0 (expect 0)
+STUBKILL PROOF: PASS

@@ -1,0 +1,18 @@
+== PHASE 3.13 CHECKPOINT G — post-state verification (2026-09-21T05:12:13Z) ==
+-- sha256 (ai.js / dsl.js / package.json / run-suite.sh must equal pre-G baseline) --
+e3df6696dd828f67ccd6dd39ccaa270ae1fae1f67a8d1b6596800846cf0cfb6e  src-js/ai.js
+e35b3132d4c274ce31d1482cdcfecb656b83c12c693bdf2ba829890d84708edd  src-js/dsl.js
+f894a34f6344f7f93da133324c35050aedbedb17356b3b48bda9608a68683e76  tests/ai.test.mjs
+b329cc0d410cef4fe81fa75deec5f2ad7655974c2ecdda13c1f669a12e8da965  package.json
+05bb64af35fdae2fca64a99a9bb2aa62db67d6d4c06e69bea421cef5d7bb95b1  scripts/run-suite.sh
+-- git status --short --
+ M scripts/run-suite.sh
+ M src-js/dsl.js
+?? scripts/phase3.13-evidence/
+?? scripts/probe-3.13-checkpointB-determinism.mjs
+?? scripts/probe-3.13-checkpointG-scan.mjs
+?? src-js/ai.js
+?? tests/ai.test.mjs
+-- src/core/ untouched --
+0
+0

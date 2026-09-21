@@ -1,0 +1,20 @@
+== pre-kill hash ==
+e35b3132d4c274ce31d1482cdcfecb656b83c12c693bdf2ba829890d84708edd
+== KILL 1 run ==
+✗ E-1: $doc:<id> literal targets resolve through context.objects (own-key check): context present: $doc:rect-1 resolves — [{"code":"DSL_UNKNOWN_REFERENCE","message":"Unknown reference $doc:rect-1","context":{"ref":"$doc:rect-1"},"instructionIndex":0,"ref":"$doc:rect-1"}]: 1 !== 0
+✗ E-2: raw-id targets (the Planner-stripped form, ai.js:1237) resolve through context.objects: both raw doc ids resolve — [{"code":"DSL_UNKNOWN_REFERENCE","message":"Unknown reference rect-1","context":{"ref":"rect-1"},"instructionIndex":0,"ref":"rect-1"},{"code":"DSL_UNKNOWN_REFERENCE","message":"Unknown reference rect-2","context":{"ref":"rect-2"},"instructionIndex":0,"ref":"rect-2"}]: 2 !== 0
+✗ E-4: with a context present, targets NOT in context.objects stay unknown (fail-loud; the substrate never guesses — §24 analog): known target resolves, unknown still errors: 2 !== 1
+✗ E-7: validateDSL threads the context — doc-referencing program invalid without, valid with; other semantic checks stay enforced: context present: valid — [{"code":"DSL_UNKNOWN_REFERENCE","message":"Unknown reference $doc:rect-1","context":{"ref":"$doc:rect-1"},"instructionIndex":0,"ref":"$doc:rect-1"}]
+✗ E-8: compileDSL threads the context — doc-referencing program compiles with context, fails without: context present: compiles — [{"code":"DSL_UNKNOWN_REFERENCE","message":"Unknown reference rect-1","context":{"ref":"rect-1"},"instructionIndex":0,"ref":"rect-1"}]
+✗ E-RT Rule E: translate T05 + scale T06 — $doc: targets survive validateDSL with context; same toolIds/inputs/targets: validateDSL(with context): [{"code":"DSL_UNKNOWN_REFERENCE","message":"Unknown reference rect-1","context":{"ref":"rect-1"},"instructionIndex":0,"ref":"rect-1"}]
+✗ E-RT Rule F: appearance T07 chain — $doc: targets round trip with context (multi-target, fill + opacity): validateDSL(with context): [{"code":"DSL_UNKNOWN_REFERENCE","message":"Unknown reference rect-1","context":{"ref":"rect-1"},"instructionIndex":0,"ref":"rect-1"},{"code":"DSL_UNKNOWN_REFERENCE","message":"Unknown reference rect-2","context":{"ref":"rect-2"},"instructionIndex":1,"ref":"rect-2"}]
+✗ E-RT Rule G: align T08 — $doc: targets round trip with context: validateDSL(with context): [{"code":"DSL_UNKNOWN_REFERENCE","message":"Unknown reference rect-1","context":{"ref":"rect-1"},"instructionIndex":0,"ref":"rect-1"},{"code":"DSL_UNKNOWN_REFERENCE","message":"Unknown reference rect-2","context":{"ref":"rect-2"},"instructionIndex":0,"ref":"rect-2"}]
+✗ E-RT Rule H: group T10 + ungroup T11 — $doc: targets round trip with context: validateDSL(with context): [{"code":"DSL_UNKNOWN_REFERENCE","message":"Unknown reference rect-1","context":{"ref":"rect-1"},"instructionIndex":0,"ref":"rect-1"},{"code":"DSL_UNKNOWN_REFERENCE","message":"Unknown reference ellipse-1","context":{"ref":"ellipse-1"},"instructionIndex":0,"ref":"ellipse-1"}]
+Tests: 121 total, 112 passed, 9 failed
+kill1 exit: 1 (expect 1)
+RESTORE OK (e35b3132d4c274ce31d1482cdcfecb656b83c12c693bdf2ba829890d84708edd)
+== post-restore run ==
+
+Tests: 121 total, 121 passed, 0 failed
+post-restore exit: 0 (expect 0)
+STUBKILL PROOF: PASS

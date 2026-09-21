@@ -1,0 +1,10 @@
+✗ D-1: every toolId of every planner-generated plan resolves in the live Tool Registry (resolution mandate): AI_NS.getPlannerRegistry is not a function
+✗ D-2: unknown toolId -> TOOL_NOT_FOUND in the validatePlan verdict: plan referencing T99 must be invalid
+✗ D-3: category validation — read (T16) / proposal (T19) tools are NOT plannable (Planner rule, revisitable): read tool step must be rejected
+✗ D-4: input validation against the tool DECLARED inputSchema (missing key / wrong type / non-finite / object type): missing required width
+✗ D-5: undeclared-but-accepted inputs stay valid (live schemas under-declare executor params; tools.js:232/240): schema-validated plan must still resolve through the registry
+✗ D-6: mutation tools are planned but NEVER executed during planning (spec §41-D boundary): create: resolution must consult the registry facade
+✗ D-7: registry is read-only from the Planner perspective (frozen projection + frozen defs + unchanged metadata): AI_NS.getPlannerRegistry is not a function
+✗ D-8: registry injection is pure DI — identical output, determinism preserved (§16): createPlan post-condition must consult the injected registry
+✗ D-9: registry-contract diagnostics — unknown category / missing inputSchema / malformed facade fail loudly: AI_NS.getPlannerRegistry is not a function
+Tests: 106 total, 97 passed, 9 failed

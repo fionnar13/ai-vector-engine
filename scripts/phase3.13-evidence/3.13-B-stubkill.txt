@@ -1,0 +1,35 @@
+== [1] snapshot pristine ai.js ==
+sha256(before) = b1393117c4bd928651fe061cb4e44c38e12ac2c1b20f02758f81b76297b9f901
+== [2] neuter createPlan (throw on entry) ==
+createPlan neutered (body throws on entry)
+== [3] run tests against the neutered createPlan ==
+Tests: 60 total, 40 passed, 20 failed
+neutered-run exit=1 (expect 1)
+failing tests: 20
+  ✗ B: §20 slice plan = T01 geometry-only -> T07 fill -> T08 both/center (12/§20): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+  ✗ B: Rule C — T01 receives NO fill key; rx AND ry both present (deviation 5): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+  ✗ B: Rule B — center math per tool anchor: rect x/y top-left, ellipse cx/cy center: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+  ✗ B: placement origin/absent — explicit x/y passthrough (tool anchor semantics), default 0,0: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+  ✗ B: create + fill + opacity -> opacity rides the T07 step (tools.js:372): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+  ✗ B: opacity-only create (no fill) -> NO_VALID_PLAN (T07 opacity-only needs an existing fill item, tools.js:377): refuses doomed plan
+  ✗ B: placement center + explicit x/y -> INVALID_PARAMETER (conflict; Planner computes placement): x conflicts with center
+  ✗ B: placement center without artboard in context -> MISSING_PARAMETER: no artboard
+  ✗ B: artboard with non-finite centerX/centerY -> INVALID_PARAMETER: NaN centerX
+  ✗ B: non-create intent types -> UNSUPPORTED_OPERATION (planning rules arrive at Checkpoint C): transform
+  ✗ B: invalid intent -> INVALID_INTENT; mutable context -> INVALID_PARAMETER; plan frozen + valid: invalid intent
+  ✗ B: non-finite x/y on a create intent (validator hole for absent placement) caught at plan time: x string
+  ✗ B: valid slice plan passes with a frozen context; verdict object shape: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+  ✗ B: structural garbage + context contract (non-frozen context throws PlanningError): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+  ✗ B: slice plan -> DSL [create, appearance, align]; no fill inside the create args (Rule C): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+  ✗ B: §24 round trip — Plan -> compilePlanToDSL -> parseDSL -> validateDSL -> compileToIR (same ops + deps): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+  ✗ B: ellipse plan compiles to create/ellipse with cx/cy/rx/ry: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+  ✗ B: same intent + same context, two runs -> Plan JSON.stringify byte-identical (no Date.now/Math.random/randomUUID): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+  ✗ B: same intent + same context, two runs -> compiled DSL JSON.stringify byte-identical: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+  ✗ B: key-order-permuted intent -> identical intentId/plan id (content-derived identity): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+== [4] restore pristine ai.js ==
+sha256(after)  = b1393117c4bd928651fe061cb4e44c38e12ac2c1b20f02758f81b76297b9f901
+restore sha256: OK
+== [5] re-run tests on the restored file ==
+Tests: 60 total, 60 passed, 0 failed
+restored-run exit=0 (expect 0)
+STUB-KILL PROOF: PASS (createPlan is load-bearing: 20 tests failed while neutered; 60/60 after restore)

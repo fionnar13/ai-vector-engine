@@ -1,0 +1,82 @@
+=== Parser Tests ===
+✓ valid program
+✓ malformed JSON
+✓ missing version
+✓ unsupported version
+✓ missing operation
+✓ unknown operation
+
+=== Schema Tests ===
+✓ wrong types width string must fail
+✓ missing required fields delete without targets
+✓ invalid enum boolean operation
+✓ invalid numeric values NaN
+✓ invalid nested objects transform without args
+
+=== Reference Tests ===
+✓ valid reference
+✓ unknown reference
+✓ duplicate reference
+✓ forward reference rejection
+
+=== Compilation Tests ===
+✓ create rect must produce T01
+✓ create ellipse T02
+✓ delete T04
+✓ transform translate T05
+✓ transform matrix T06
+✓ appearance T07
+✓ align T08
+✓ distribute T09
+✓ group T10
+✓ boolean T13
+✓ propose_constraint T19
+✓ propose_semantic T20
+
+=== DSL Operations ===
+✓ create rect
+✓ update
+✓ update geometry fields rejected at compile
+✓ delete
+✓ transform
+✓ appearance
+✓ group
+✓ ungroup
+✓ reorder
+✓ boolean
+✓ align
+✓ distribute
+✓ pointText
+✓ artboard
+✓ constraint proposal
+✓ semantic proposal
+
+=== Serialization ===
+✓ serialize deterministic
+✓ round-trippable
+
+=== Linter ===
+✓ linter unused reference warning
+✓ linter undefined reference error
+
+=== Critical: Non-Mutation Test ===
+✓ compile does not mutate stores
+
+=== Critical: Proposal Test ===
+
+=== Critical: Rollback Test ===
+
+=== Critical: Vertical Slice ===
+
+=== Security ===
+✓ rejects __proto__
+✓ rejects eval in args
+
+=== Determinism ===
+✓ deterministic compile
+✓ propose_constraint Proposal returned ConstraintStore unchanged
+✓ update fill still routes to T07 (appearance path unchanged)
+✓ vertical slice create red 200x100 rx12 and center
+✓ rollback on failure atomicity
+
+Tests: 55 total, 55 passed, 0 failed

@@ -1,0 +1,22 @@
+ExpectedState:
+  run1 JSON : {"intentId":"intent-77a22f3a","status":"requested","geometry":{"width":200,"height":100,"rx":12,"ry":12,"area":20000,"symmetric":true},"spatial":{"aligned":null,"centered":true,"bbox":null},"appearance":{"fill":"#FF0000","stroke":null,"opacity":null},"constraint":{"satisfied":null},"structure":{"grouped":false}}
+  run2 JSON : {"intentId":"intent-77a22f3a","status":"requested","geometry":{"width":200,"height":100,"rx":12,"ry":12,"area":20000,"symmetric":true},"spatial":{"aligned":null,"centered":true,"bbox":null},"appearance":{"fill":"#FF0000","stroke":null,"opacity":null},"constraint":{"satisfied":null},"structure":{"grouped":false}}
+  byte-identical: YES
+  run1 sha256: fd456878373fef130a722682977adbe9ab2bd88aeefe62a451f9c6d5e222a668
+  run2 sha256: fd456878373fef130a722682977adbe9ab2bd88aeefe62a451f9c6d5e222a668
+Plan:
+  run1 JSON : {"id":"plan-254f7217","intentId":"intent-77a22f3a","steps":[{"id":"step-1","toolId":"T01","input":{"x":300,"y":250,"width":200,"height":100,"rx":12,"ry":12}},{"id":"step-2","toolId":"T07","input":{"objectIds":["$step-1"],"fill":{"kind":"solid","color":"#FF0000"}}},{"id":"step-3","toolId":"T08","input":{"objectIds":["$step-1"],"axis":"both","mode":"center"}}],"expectedState":{"intentId":"intent-77a22f3a","status":"requested","geometry":{"width":200,"height":100,"rx":12,"ry":12,"area":20000,"symmetric":true},"spatial":{"aligned":null,"centered":true,"bbox":null},"appearance":{"fill":"#FF0000","stroke":null,"opacity":null},"constraint":{"satisfied":null},"structure":{"grouped":false}},"deterministic":true,"parentPlanId":null}
+  run2 JSON : {"id":"plan-254f7217","intentId":"intent-77a22f3a","steps":[{"id":"step-1","toolId":"T01","input":{"x":300,"y":250,"width":200,"height":100,"rx":12,"ry":12}},{"id":"step-2","toolId":"T07","input":{"objectIds":["$step-1"],"fill":{"kind":"solid","color":"#FF0000"}}},{"id":"step-3","toolId":"T08","input":{"objectIds":["$step-1"],"axis":"both","mode":"center"}}],"expectedState":{"intentId":"intent-77a22f3a","status":"requested","geometry":{"width":200,"height":100,"rx":12,"ry":12,"area":20000,"symmetric":true},"spatial":{"aligned":null,"centered":true,"bbox":null},"appearance":{"fill":"#FF0000","stroke":null,"opacity":null},"constraint":{"satisfied":null},"structure":{"grouped":false}},"deterministic":true,"parentPlanId":null}
+  byte-identical: YES
+  run1 sha256: b3944cdf317a40d6ddc287212b563cf273f69d7b27760971b25576ccd463bad6
+  run2 sha256: b3944cdf317a40d6ddc287212b563cf273f69d7b27760971b25576ccd463bad6
+DSL:
+  run1 JSON : {"version":"1.0","program":[{"op":"create","id":"step-1","type":"rect","args":{"x":300,"y":250,"width":200,"height":100,"rx":12,"ry":12}},{"op":"appearance","target":"step-1","args":{"fill":"#FF0000"}},{"op":"align","targets":["step-1"],"args":{"axis":"both","mode":"center"}}]}
+  run2 JSON : {"version":"1.0","program":[{"op":"create","id":"step-1","type":"rect","args":{"x":300,"y":250,"width":200,"height":100,"rx":12,"ry":12}},{"op":"appearance","target":"step-1","args":{"fill":"#FF0000"}},{"op":"align","targets":["step-1"],"args":{"axis":"both","mode":"center"}}]}
+  byte-identical: YES
+  run1 sha256: 4ff9b8283dde36480f523385b17a85fdb357a44a832c3cd5172c69687401a366
+  run2 sha256: 4ff9b8283dde36480f523385b17a85fdb357a44a832c3cd5172c69687401a366
+plan.id = plan-254f7217
+plan.intentId = intent-77a22f3a
+
+DETERMINISM PROOF (§16): same input + same context -> identical output = PROVEN

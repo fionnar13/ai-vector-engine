@@ -1,0 +1,524 @@
+// ============================================================================
+// src-js/ai.js — AI PLANNER + EXPECTED STATE (PHASE 3.13)
+// ============================================================================
+// CHECKPOINT A scope (spec §41-A): Intent / ExpectedState / Plan / PlanStep /
+// PlanningContext types + validators + planning error codes, plus the
+// mechanical builders the Planner core (Checkpoint B) will compose.
+//
+// ARCHITECTURE BOUNDARY (spec R01/§13/§26):
+//   - This module is PURE: it imports nothing from other src-js modules, holds
+//     no store references, and exposes no mutation surface. The only mutation
+//     path stays: Plan -> DSL/IR -> Tool Registry -> Mutation Tools ->
+//     Transaction -> Commit (spec §01).
+//   - PlanningContext is a deep-frozen plain-data snapshot; projections that
+//     contain any function value are rejected at construction time, so the
+//     context can never carry mutation methods.
+//
+// DETERMINISM (spec §16): this module contains no entropy sources of any kind.
+// Plan and intent identifiers are content-derived: FNV-1a over a key-sorted
+// canonical JSON serialization. Runtime IDs (objectIds, transactionIds) are
+// allocated by the existing execution substrate, not by the Planner.
+//
+// House style: single-file module, compact functions, {valid, errors} result
+// objects with {code, message, details?} error entries (mirrors dsl.js /
+// tools.js validate functions).
+// ============================================================================
+
+// ---- 1. Planning error model (spec §14) ------------------------------------
+
+export const PlanningErrorCodes = Object.freeze({
+  INVALID_INTENT: 'INVALID_INTENT',
+  UNSUPPORTED_OPERATION: 'UNSUPPORTED_OPERATION',
+  UNSUPPORTED_OBJECT_TYPE: 'UNSUPPORTED_OBJECT_TYPE',
+  MISSING_PARAMETER: 'MISSING_PARAMETER',
+  INVALID_PARAMETER: 'INVALID_PARAMETER',
+  NO_VALID_PLAN: 'NO_VALID_PLAN',
+  TOOL_NOT_FOUND: 'TOOL_NOT_FOUND',
+  TOOL_INPUT_INVALID: 'TOOL_INPUT_INVALID',
+  PLAN_INVALID: 'PLAN_INVALID',
+  PLAN_NON_DETERMINISTIC: 'PLAN_NON_DETERMINISTIC',
+  PLANNER_STATE_MUTATION: 'PLANNER_STATE_MUTATION'
+});
+
+export class PlanningError extends Error {
+  constructor(code, message, details){
+    super(message);
+    this.name = 'PlanningError';
+    this.code = code;
+    if (details !== undefined) this.details = details;
+  }
+}
+
+function createError(code, message, details){
+  const e = { code, message };
+  if (details !== undefined) e.details = details;
+  return e;
+}
+
+// ---- 2. Shared primitive guards + deterministic canonical form (§16) -------
+
+function isPlainObject(v){ return v !== null && typeof v === 'object' && !Array.isArray(v); }
+function isFiniteNumber(v){ return typeof v === 'number' && Number.isFinite(v); }
+function isNonEmptyString(v){ return typeof v === 'string' && v.length > 0; }
+function isHexColor(v){ return typeof v === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v); }
+
+// Depth-first scan: returns the path of the first function value, or null.
+function findFunctionPath(value, path){
+  if (typeof value === 'function') return path || '(root)';
+  if (Array.isArray(value)){
+    for (let i = 0; i < value.length; i++){
+      const hit = findFunctionPath(value[i], `${path}[${i}]`);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (isPlainObject(value)){
+    for (const k of Object.keys(value)){
+      const hit = findFunctionPath(value[k], `${path}.${k}`);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+function deepFreeze(value){
+  if (isPlainObject(value) || Array.isArray(value)){
+    for (const k of Object.keys(value)) deepFreeze(value[k]);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+// Key-sorted serialization: identical logical content always yields an
+// identical string, independent of property insertion order.
+function stableStringify(value){
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (isPlainObject(value)){
+    const keys = Object.keys(value).sort();
+    return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+// FNV-1a, 32 bit. Pure integer arithmetic, no entropy, stable across engines.
+function fnv1a32(str){
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++){
+    h ^= str.charCodeAt(i);
+    h = (h + ((h << 1) >>> 0) + ((h << 4) >>> 0) + ((h << 7) >>> 0) + ((h << 8) >>> 0) + ((h << 24) >>> 0)) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+// ---- 3. Intent model (spec §05/§07) -----------------------------------------
+
+export const INTENT_CATEGORIES = Object.freeze(['create', 'transform', 'appearance', 'alignment', 'structure']);
+
+// Canonical object types. The Intent surface uses the spec vocabulary
+// ('rectangle' per §05/§07 examples); plan compilation later maps to the DSL
+// create types 'rect' | 'ellipse' (dsl.js:365-372) and registry tools
+// T01 create_rectangle / T02 create_ellipse (tools.js:227/:251, spec §11).
+const OBJECT_TYPES = Object.freeze({ rectangle: 'rect', rect: 'rect', ellipse: 'ellipse' });
+
+export function normalizeObjectType(objectType){
+  return OBJECT_TYPES[objectType] || null;
+}
+
+const CREATE_RECT_KEYS = ['type', 'objectType', 'width', 'height', 'rx', 'ry', 'fill', 'opacity', 'placement', 'x', 'y'];
+const CREATE_ELLIPSE_KEYS = ['type', 'objectType', 'rx', 'ry', 'fill', 'opacity', 'placement', 'x', 'y'];
+const ALIGN_H = ['left', 'center', 'right'];
+const ALIGN_V = ['top', 'middle', 'bottom'];
+
+function rejectUnknownKeys(intent, keys, errors){
+  for (const k of Object.keys(intent)){
+    if (!keys.includes(k)) errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `Unknown intent field ${k}`, { field: k }));
+  }
+}
+
+function requirePositiveFinite(intent, field, errors){
+  if (!(field in intent)){
+    errors.push(createError(PlanningErrorCodes.MISSING_PARAMETER, `Intent field ${field} is required`, { field }));
+    return;
+  }
+  const v = intent[field];
+  if (!isFiniteNumber(v) || v <= 0){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `Intent field ${field} must be a finite number > 0`, { field, value: v }));
+  }
+}
+
+function optionalNonNegativeFinite(intent, field, errors){
+  if (!(field in intent)) return;
+  const v = intent[field];
+  if (!isFiniteNumber(v) || v < 0){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `Intent field ${field} must be a finite number >= 0`, { field, value: v }));
+  }
+}
+
+function optionalFiniteCoord(intent, field, errors){
+  if (!(field in intent)) return;
+  if (!isFiniteNumber(intent[field])){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `Intent field ${field} must be a finite number`, { field, value: intent[field] }));
+  }
+}
+
+function optionalColor(intent, field, errors){
+  if (!(field in intent)) return;
+  if (!isHexColor(intent[field])){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `Intent field ${field} must be a hex color like #RRGGBB or #RGB`, { field, value: intent[field] }));
+  }
+}
+
+function optionalRatio(intent, field, errors){
+  if (!(field in intent)) return;
+  const v = intent[field];
+  if (!isFiniteNumber(v) || v < 0 || v > 1){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `Intent field ${field} must be a finite number in [0,1]`, { field, value: v }));
+  }
+}
+
+function requireTargets(intent, errors){
+  if (!('targets' in intent) || intent.targets === undefined){
+    errors.push(createError(PlanningErrorCodes.MISSING_PARAMETER, 'Intent field targets is required', { field: 'targets' }));
+    return;
+  }
+  if (!Array.isArray(intent.targets) || intent.targets.length === 0 || !intent.targets.every(isNonEmptyString)){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'Intent field targets must be a non-empty array of strings', { field: 'targets' }));
+  }
+}
+
+function validateCreateIntent(intent, errors){
+  const canonical = isNonEmptyString(intent.objectType) ? normalizeObjectType(intent.objectType) : null;
+  rejectUnknownKeys(intent, canonical === 'ellipse' ? CREATE_ELLIPSE_KEYS : CREATE_RECT_KEYS, errors);
+  if (!isNonEmptyString(intent.objectType)){
+    errors.push(createError(PlanningErrorCodes.MISSING_PARAMETER, 'Intent field objectType is required', { field: 'objectType' }));
+    return;
+  }
+  if (!canonical){
+    errors.push(createError(PlanningErrorCodes.UNSUPPORTED_OBJECT_TYPE, `Unsupported objectType ${intent.objectType}`, { objectType: intent.objectType }));
+    return;
+  }
+  if (canonical === 'rect'){
+    requirePositiveFinite(intent, 'width', errors);
+    requirePositiveFinite(intent, 'height', errors);
+    optionalNonNegativeFinite(intent, 'rx', errors);
+    optionalNonNegativeFinite(intent, 'ry', errors);
+  } else {
+    // ellipse: rx/ry are radii (T02 schema tools.js:251 requires rx/ry > 0)
+    requirePositiveFinite(intent, 'rx', errors);
+    requirePositiveFinite(intent, 'ry', errors);
+  }
+  optionalColor(intent, 'fill', errors);
+  optionalRatio(intent, 'opacity', errors);
+  if ('placement' in intent && !['center', 'origin'].includes(intent.placement)){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `Intent field placement must be 'center' or 'origin'`, { field: 'placement', value: intent.placement }));
+  }
+  if (intent.placement === 'origin'){
+    optionalFiniteCoord(intent, 'x', errors);
+    optionalFiniteCoord(intent, 'y', errors);
+  }
+}
+
+function validateTransformIntent(intent, errors){
+  rejectUnknownKeys(intent, ['type', 'targets', 'operation', 'params'], errors);
+  requireTargets(intent, errors);
+  if (!isNonEmptyString(intent.operation)){
+    errors.push(createError(PlanningErrorCodes.MISSING_PARAMETER, 'Intent field operation is required', { field: 'operation' }));
+    return;
+  }
+  const p = intent.params;
+  if (intent.operation === 'translate'){
+    if (!isPlainObject(p) || !('x' in p) || !('y' in p)){
+      errors.push(createError(PlanningErrorCodes.MISSING_PARAMETER, 'translate requires params {x, y}', { field: 'params' }));
+      return;
+    }
+    if (!isFiniteNumber(p.x) || !isFiniteNumber(p.y)){
+      errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'translate params x/y must be finite numbers', { params: p }));
+    }
+  } else if (intent.operation === 'scale'){
+    if (!isPlainObject(p) || !('x' in p) || !('y' in p)){
+      errors.push(createError(PlanningErrorCodes.MISSING_PARAMETER, 'scale requires params {x, y}', { field: 'params' }));
+      return;
+    }
+    if (!isFiniteNumber(p.x) || !isFiniteNumber(p.y) || p.x === 0 || p.y === 0){
+      errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'scale factors must be finite and non-zero', { params: p }));
+    }
+  } else if (intent.operation === 'rotate'){
+    if (!isPlainObject(p) || !('degrees' in p)){
+      errors.push(createError(PlanningErrorCodes.MISSING_PARAMETER, 'rotate requires params {degrees}', { field: 'params' }));
+      return;
+    }
+    if (!isFiniteNumber(p.degrees)){
+      errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'rotate degrees must be a finite number', { params: p }));
+    }
+  } else if (intent.operation === 'matrix'){
+    if (!isPlainObject(p)){
+      errors.push(createError(PlanningErrorCodes.MISSING_PARAMETER, 'matrix requires params {a,b,c,d,tx,ty}', { field: 'params' }));
+      return;
+    }
+    for (const f of ['a', 'b', 'c', 'd', 'tx', 'ty']){
+      if (!isFiniteNumber(p[f])) errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `matrix.${f} must be a finite number`, { field: f }));
+    }
+    if ([p.a, p.b, p.c, p.d].every(isFiniteNumber) && Math.abs(p.a * p.d - p.b * p.c) < 1e-12){
+      errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'matrix is singular', { determinant: p.a * p.d - p.b * p.c }));
+    }
+  } else {
+    errors.push(createError(PlanningErrorCodes.UNSUPPORTED_OPERATION, `Unsupported transform operation ${intent.operation}`, { operation: intent.operation }));
+  }
+}
+
+function validateAppearanceIntent(intent, errors){
+  rejectUnknownKeys(intent, ['type', 'targets', 'fill', 'opacity'], errors);
+  requireTargets(intent, errors);
+  if (!('fill' in intent) && !('opacity' in intent)){
+    errors.push(createError(PlanningErrorCodes.MISSING_PARAMETER, 'appearance intent requires fill and/or opacity', { fields: ['fill', 'opacity'] }));
+  }
+  optionalColor(intent, 'fill', errors);
+  optionalRatio(intent, 'opacity', errors);
+}
+
+function validateAlignmentIntent(intent, errors){
+  rejectUnknownKeys(intent, ['type', 'targets', 'axis', 'mode'], errors);
+  requireTargets(intent, errors);
+  if (!isNonEmptyString(intent.axis)){
+    errors.push(createError(PlanningErrorCodes.MISSING_PARAMETER, 'Intent field axis is required', { field: 'axis' }));
+    return;
+  }
+  if (!['horizontal', 'vertical', 'both'].includes(intent.axis)){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `Invalid alignment axis ${intent.axis}`, { axis: intent.axis }));
+    return;
+  }
+  if (!isNonEmptyString(intent.mode)){
+    errors.push(createError(PlanningErrorCodes.MISSING_PARAMETER, 'Intent field mode is required', { field: 'mode' }));
+    return;
+  }
+  const modeOk = intent.axis === 'horizontal' ? ALIGN_H.includes(intent.mode)
+    : intent.axis === 'vertical' ? ALIGN_V.includes(intent.mode)
+    : ALIGN_H.concat(ALIGN_V).includes(intent.mode);
+  if (!modeOk){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `Invalid alignment mode ${intent.mode} for axis ${intent.axis}`, { axis: intent.axis, mode: intent.mode }));
+  }
+}
+
+function validateStructureIntent(intent, errors){
+  rejectUnknownKeys(intent, ['type', 'operation', 'targets'], errors);
+  if (!isNonEmptyString(intent.operation)){
+    errors.push(createError(PlanningErrorCodes.MISSING_PARAMETER, 'Intent field operation is required', { field: 'operation' }));
+    return;
+  }
+  if (!['group', 'ungroup'].includes(intent.operation)){
+    errors.push(createError(PlanningErrorCodes.UNSUPPORTED_OPERATION, `Unsupported structure operation ${intent.operation}`, { operation: intent.operation }));
+    return;
+  }
+  requireTargets(intent, errors);
+}
+
+// Validates a structured Intent (spec §07). Deterministic: identical input
+// always yields an identical {valid, errors} result.
+export function validateIntent(intent){
+  if (!isPlainObject(intent)) return { valid: false, errors: [createError(PlanningErrorCodes.INVALID_INTENT, 'Intent must be a plain object')] };
+  if (!isNonEmptyString(intent.type)) return { valid: false, errors: [createError(PlanningErrorCodes.INVALID_INTENT, 'Intent.type is required')] };
+  if (!INTENT_CATEGORIES.includes(intent.type)){
+    return { valid: false, errors: [createError(PlanningErrorCodes.UNSUPPORTED_OPERATION, `Unsupported intent type ${intent.type}`, { type: intent.type })] };
+  }
+  const errors = [];
+  if (intent.type === 'create') validateCreateIntent(intent, errors);
+  else if (intent.type === 'transform') validateTransformIntent(intent, errors);
+  else if (intent.type === 'appearance') validateAppearanceIntent(intent, errors);
+  else if (intent.type === 'alignment') validateAlignmentIntent(intent, errors);
+  else validateStructureIntent(intent, errors);
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 4. ExpectedState (spec §08/§09) ----------------------------------------
+
+// Mechanical derivation of the REQUESTED state from a validated intent.
+// §09: ExpectedState is descriptive, NOT canonical document state; the Planner
+// must not pretend it is already true — hence the status marker below. The
+// Critic (future phase) is the component that compares requested vs measured.
+export function buildExpectedState(intent){
+  const check = validateIntent(intent);
+  if (!check.valid){
+    throw new PlanningError(PlanningErrorCodes.INVALID_INTENT, 'buildExpectedState requires a valid intent', check.errors);
+  }
+  const intentId = 'intent-' + fnv1a32(stableStringify(intent));
+  const es = {
+    intentId,
+    status: 'requested',
+    geometry: { width: null, height: null, rx: null, ry: null, area: null, symmetric: null },
+    spatial: { aligned: null, centered: null, bbox: null },
+    appearance: { fill: null, stroke: null, opacity: null },
+    constraint: { satisfied: null },
+    structure: { grouped: null }
+  };
+  if (intent.type === 'create'){
+    const canonical = normalizeObjectType(intent.objectType);
+    if (canonical === 'rect'){
+      es.geometry.width = intent.width;
+      es.geometry.height = intent.height;
+      es.geometry.rx = intent.rx ?? 0;
+      es.geometry.ry = intent.ry ?? 0;
+      es.geometry.area = intent.width * intent.height;
+      es.geometry.symmetric = es.geometry.rx === es.geometry.ry;
+    } else {
+      es.geometry.rx = intent.rx;
+      es.geometry.ry = intent.ry;
+      es.geometry.area = Math.PI * intent.rx * intent.ry;
+      es.geometry.symmetric = intent.rx === intent.ry;
+    }
+    es.spatial.centered = intent.placement === 'center';
+    es.structure.grouped = false;
+    es.appearance.fill = intent.fill ?? null;
+    es.appearance.opacity = intent.opacity ?? null;
+  } else if (intent.type === 'appearance'){
+    es.appearance.fill = intent.fill ?? null;
+    es.appearance.opacity = intent.opacity ?? null;
+  } else if (intent.type === 'alignment'){
+    es.spatial.aligned = true;
+  } else if (intent.type === 'structure'){
+    es.structure.grouped = intent.operation === 'group';
+  }
+  // transform: sections stay null — the geometry outcome depends on execution.
+  return es;
+}
+
+const EXPECTED_STATE_SECTIONS = ['geometry', 'spatial', 'appearance', 'constraint', 'structure'];
+
+export function validateExpectedState(state){
+  const errors = [];
+  if (!isPlainObject(state)) return { valid: false, errors: [createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState must be a plain object')] };
+  const fnPath = findFunctionPath(state, 'state');
+  if (fnPath) return { valid: false, errors: [createError(PlanningErrorCodes.INVALID_PARAMETER, `ExpectedState must be plain data; function value at ${fnPath}`)] };
+  for (const section of EXPECTED_STATE_SECTIONS){
+    if (!isPlainObject(state[section])){
+      errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `ExpectedState.${section} section missing or invalid`, { section }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (state.status !== 'requested' && state.status !== 'measured'){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `ExpectedState.status must be 'requested' or 'measured'`, { status: state.status }));
+  }
+  if (state.intentId !== undefined && !isNonEmptyString(state.intentId)){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.intentId must be a non-empty string when present'));
+  }
+  const g = state.geometry;
+  for (const f of ['width', 'height', 'rx', 'ry', 'area']){
+    if (g[f] !== null && g[f] !== undefined && !isFiniteNumber(g[f])){
+      errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `ExpectedState.geometry.${f} must be null or a finite number`, { field: f, value: g[f] }));
+    }
+  }
+  if (g.symmetric !== null && g.symmetric !== undefined && typeof g.symmetric !== 'boolean'){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.geometry.symmetric must be null or boolean'));
+  }
+  const sp = state.spatial;
+  for (const f of ['aligned', 'centered']){
+    if (sp[f] !== null && sp[f] !== undefined && typeof sp[f] !== 'boolean'){
+      errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `ExpectedState.spatial.${f} must be null or boolean`));
+    }
+  }
+  if (sp.bbox !== null && sp.bbox !== undefined){
+    if (!isPlainObject(sp.bbox)) errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.spatial.bbox must be null or a plain object'));
+    else for (const f of ['minX', 'minY', 'maxX', 'maxY']){
+      if (!isFiniteNumber(sp.bbox[f])) errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `ExpectedState.spatial.bbox.${f} must be a finite number`));
+    }
+  }
+  const ap = state.appearance;
+  for (const f of ['fill', 'stroke']){
+    if (ap[f] !== null && ap[f] !== undefined && !isHexColor(ap[f])){
+      errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, `ExpectedState.appearance.${f} must be null or a hex color`));
+    }
+  }
+  if (ap.opacity !== null && ap.opacity !== undefined && (!isFiniteNumber(ap.opacity) || ap.opacity < 0 || ap.opacity > 1)){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.appearance.opacity must be null or a number in [0,1]'));
+  }
+  if (state.constraint.satisfied !== null && state.constraint.satisfied !== undefined && typeof state.constraint.satisfied !== 'boolean'){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.constraint.satisfied must be null or boolean'));
+  }
+  if (state.structure.grouped !== null && state.structure.grouped !== undefined && typeof state.structure.grouped !== 'boolean'){
+    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.structure.grouped must be null or boolean'));
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 5. Plan / PlanStep (spec §10) ------------------------------------------
+
+export function makePlanStep(id, toolId, input){
+  return { id, toolId, input };
+}
+
+// Mechanical Plan assembly. Identifiers are content-derived (§16): the plan id
+// hashes {intentId, steps, expectedState}; the intentId hashes the intent.
+// Full rule-driven plan construction is Checkpoint B (spec §41-B).
+export function makePlan({ intent, steps, expectedState, parentPlanId }){
+  const resolvedIntentId = 'intent-' + fnv1a32(stableStringify(intent));
+  return {
+    id: 'plan-' + fnv1a32(stableStringify({ intentId: resolvedIntentId, steps, expectedState })),
+    intentId: resolvedIntentId,
+    steps,
+    expectedState,
+    deterministic: true,
+    parentPlanId: parentPlanId ?? null
+  };
+}
+
+export function validatePlanStep(step){
+  const errors = [];
+  if (!isPlainObject(step)) return { valid: false, errors: [createError(PlanningErrorCodes.PLAN_INVALID, 'PlanStep must be a plain object')] };
+  if (findFunctionPath(step, 'step')) return { valid: false, errors: [createError(PlanningErrorCodes.PLAN_INVALID, 'PlanStep must be plain data')] };
+  if (!isNonEmptyString(step.id)) errors.push(createError(PlanningErrorCodes.PLAN_INVALID, 'PlanStep.id must be a non-empty string', { field: 'id' }));
+  if (!isNonEmptyString(step.toolId)) errors.push(createError(PlanningErrorCodes.PLAN_INVALID, 'PlanStep.toolId must be a non-empty string', { field: 'toolId' }));
+  if (!isPlainObject(step.input)) errors.push(createError(PlanningErrorCodes.PLAN_INVALID, 'PlanStep.input must be a plain object', { field: 'input' }));
+  return { valid: errors.length === 0, errors };
+}
+
+// STRUCTURAL plan validation (spec §18 subset assigned to Checkpoint A):
+// Plan ID, Intent ID, step shape, ExpectedState shape, determinism flag.
+// Tool existence / category / input-schema / dependency-reference validation
+// arrives with Checkpoints B and D (spec §41-B/§41-D) via the real registry.
+export function validatePlanStructure(plan){
+  const errors = [];
+  if (!isPlainObject(plan)) return { valid: false, errors: [createError(PlanningErrorCodes.PLAN_INVALID, 'Plan must be a plain object')] };
+  if (findFunctionPath(plan, 'plan')) return { valid: false, errors: [createError(PlanningErrorCodes.PLAN_INVALID, 'Plan must be plain data')] };
+  if (!isNonEmptyString(plan.id)) errors.push(createError(PlanningErrorCodes.PLAN_INVALID, 'Plan.id must be a non-empty string', { field: 'id' }));
+  if (!isNonEmptyString(plan.intentId)) errors.push(createError(PlanningErrorCodes.PLAN_INVALID, 'Plan.intentId must be a non-empty string (§18: Intent ID)', { field: 'intentId' }));
+  if (!Array.isArray(plan.steps) || plan.steps.length === 0){
+    errors.push(createError(PlanningErrorCodes.PLAN_INVALID, 'Plan.steps must be a non-empty array (§10)', { field: 'steps' }));
+  } else {
+    for (let i = 0; i < plan.steps.length; i++){
+      const s = validatePlanStep(plan.steps[i]);
+      if (!s.valid){
+        for (const e of s.errors) errors.push(createError(e.code, `step[${i}]: ${e.message}`, e.details));
+      }
+    }
+  }
+  if (plan.expectedState === undefined || !validateExpectedState(plan.expectedState).valid){
+    errors.push(createError(PlanningErrorCodes.PLAN_INVALID, 'Plan.expectedState must be a valid ExpectedState (§08)', { field: 'expectedState' }));
+  }
+  if (plan.deterministic !== true){
+    errors.push(createError(PlanningErrorCodes.PLAN_NON_DETERMINISTIC, 'Plan.deterministic must be true (§16)', { field: 'deterministic' }));
+  }
+  if (plan.parentPlanId !== null && plan.parentPlanId !== undefined && !isNonEmptyString(plan.parentPlanId)){
+    errors.push(createError(PlanningErrorCodes.PLAN_INVALID, 'Plan.parentPlanId must be null or a non-empty string', { field: 'parentPlanId' }));
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 6. PlanningContext (spec §13) ------------------------------------------
+
+// Read-only snapshot container. The projection MUST be plain data (plain
+// objects / arrays / primitives). Any function value — including store methods
+// such as write/execute/add — is rejected at construction time, so the context
+// can never expose a mutation method to the Planner. The result is deep-frozen.
+export function createPlanningContext(projection){
+  if (!isPlainObject(projection)){
+    throw new PlanningError(PlanningErrorCodes.INVALID_PARAMETER, 'PlanningContext projection must be a plain object');
+  }
+  const fnPath = findFunctionPath(projection, 'context');
+  if (fnPath){
+    throw new PlanningError(
+      PlanningErrorCodes.INVALID_PARAMETER,
+      `PlanningContext must be a plain-data read-only snapshot (§13); function value found at ${fnPath}`,
+      { path: fnPath }
+    );
+  }
+  return deepFreeze(JSON.parse(JSON.stringify(projection)));
+}

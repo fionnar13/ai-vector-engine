@@ -1,0 +1,75 @@
+=== PHASE 3.13 Checkpoint A: PlanningErrorCodes (spec §14) ===
+✓ all 11 mandated planning error codes exist
+✓ PlanningError carries code + message and is an Error
+=== Checkpoint A: validateIntent — create (spec §05/§07) ===
+✓ spec §07 create-rectangle example is valid
+✓ missing type -> INVALID_INTENT; unknown type -> UNSUPPORTED_OPERATION
+✓ null / non-object intent -> INVALID_INTENT
+✓ missing objectType -> MISSING_PARAMETER
+✓ unknown objectType -> UNSUPPORTED_OBJECT_TYPE
+✓ missing width/height -> MISSING_PARAMETER
+✓ non-finite numeric values -> INVALID_PARAMETER (spec §07)
+✓ invalid dimensions (<=0) -> INVALID_PARAMETER
+✓ invalid color -> INVALID_PARAMETER
+✓ invalid opacity / placement -> INVALID_PARAMETER
+✓ create ellipse requires rx/ry; unknown keys rejected
+=== Checkpoint A: validateIntent — transform/appearance/alignment/structure (§07) ===
+✓ transform intent: valid translate; unknown operation -> UNSUPPORTED_OPERATION
+✓ appearance intent: fill and/or opacity; neither -> MISSING_PARAMETER
+✓ alignment intent: mode must be valid for axis (T08 rules, tools.js:399-402)
+✓ structure intent: group/ungroup only
+=== Checkpoint A: ExpectedState (spec §08/§09) ===
+✓ buildExpectedState: mechanical derivation for create rect (requested, not measured)
+✓ buildExpectedState: rx/ry default to 0 (symmetric true) when omitted
+✓ buildExpectedState: appearance / alignment / structure intents map their sections
+✓ validateExpectedState rejects missing sections / bad status / function values
+=== Checkpoint A: Plan / PlanStep (spec §10/§16) ===
+✓ makePlanStep + validatePlanStep
+✓ makePlan: §10 shape {id, intentId, steps, expectedState, deterministic, parentPlanId}
+✓ §16 determinism: identical intent + steps -> identical plan id + intentId
+✓ validatePlanStructure rejections: empty steps, deterministic=false, bad step, bad state
+=== Checkpoint A: PlanningContext (spec §13) ===
+✓ createPlanningContext: deep-frozen plain-data projection
+✓ createPlanningContext rejects function values (no mutation methods can be exposed, §13)
+✓ createPlanningContext rejects non-object input
+=== Checkpoint A: static determinism + security scan of src-js/ai.js (§05/§16/§26 precedent) ===
+✓ planner source is free of nondeterminism and forbidden capabilities
+=== Checkpoint B: fixtures (spec §20 vertical-slice intent) ===
+=== Checkpoint B: createExpectedState (spec §08/§15) ===
+✓ B: createExpectedState returns a deep-frozen, valid ExpectedState equal to buildExpectedState
+✓ B: createExpectedState throws PlanningError for an invalid intent (top-level INVALID_INTENT, specific code in details — buildExpectedState contract, ai.js:341)
+✓ B: createExpectedState rejects a mutable (non-frozen) context and a non-object context (§13)
+✓ B: createExpectedState works without a context (context optional at Checkpoint B)
+=== Checkpoint B: createPlan — Rules A/B/C/D on create intents (§12/§17/§20) ===
+✓ B: §20 slice plan = T01 geometry-only -> T07 fill -> T08 both/center (12/§20)
+✓ B: Rule C — T01 receives NO fill key; rx AND ry both present (deviation 5)
+✓ B: Rule B — center math per tool anchor: rect x/y top-left, ellipse cx/cy center
+✓ B: placement origin/absent — explicit x/y passthrough (tool anchor semantics), default 0,0
+✓ B: create + fill + opacity -> opacity rides the T07 step (tools.js:372)
+✓ B: opacity-only create (no fill) -> NO_VALID_PLAN (T07 opacity-only needs an existing fill item, tools.js:377)
+✓ B: placement center + explicit x/y -> INVALID_PARAMETER (conflict; Planner computes placement)
+✓ B: placement center without artboard in context -> MISSING_PARAMETER
+✓ B: artboard with non-finite centerX/centerY -> INVALID_PARAMETER
+✓ B: non-create intent types -> UNSUPPORTED_OPERATION (planning rules arrive at Checkpoint C)
+✓ B: invalid intent -> INVALID_INTENT; mutable context -> INVALID_PARAMETER; plan frozen + valid
+✓ B: non-finite x/y on a create intent (validator hole for absent placement) caught at plan time
+=== Checkpoint B: validatePlan (spec §18) ===
+✓ B: valid slice plan passes with a frozen context; verdict object shape
+✓ B: PLANNER RULE — centered ExpectedState without a T08 step -> PLAN_INVALID (spec §20 mandate)
+✓ B: PLANNER RULE — T08 present but axis/mode not both/center -> PLAN_INVALID
+✓ B: dependency references — unknown $ref and forward $ref -> PLAN_INVALID
+✓ B: dependency convention — objectIds entries must use the $stepId form
+✓ B: duplicate step ids -> PLAN_INVALID
+✓ B: structural garbage + context contract (non-frozen context throws PlanningError)
+=== Checkpoint B: compilePlanToDSL (spec §23/§24) ===
+✓ B: slice plan -> DSL [create, appearance, align]; no fill inside the create args (Rule C)
+✓ B: §24 round trip — Plan -> compilePlanToDSL -> parseDSL -> validateDSL -> compileToIR (same ops + deps)
+✓ B: ellipse plan compiles to create/ellipse with cx/cy/rx/ry
+✓ B: compilePlanToDSL guards — unknown toolId, non-solid fill, empty T07, missing objectIds, invalid plan
+=== Checkpoint B: §16 determinism proof (mandatory) ===
+✓ B: same intent + same context, two runs -> ExpectedState JSON.stringify byte-identical
+✓ B: same intent + same context, two runs -> Plan JSON.stringify byte-identical (no Date.now/Math.random/randomUUID)
+✓ B: same intent + same context, two runs -> compiled DSL JSON.stringify byte-identical
+✓ B: key-order-permuted intent -> identical intentId/plan id (content-derived identity)
+
+Tests: 60 total, 60 passed, 0 failed

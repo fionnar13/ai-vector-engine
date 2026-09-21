@@ -1,0 +1,3 @@
+✓ C-X: resolvable $doc: refs validate clean; $step refs unaffected (both kinds coexist)
+
+Tests: 97 total, 97 passed, 0 failed
