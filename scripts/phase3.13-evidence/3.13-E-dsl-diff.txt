@@ -1,0 +1,110 @@
+--- scripts/phase3.13-evidence/dsl.js.checkpointD.pristine	2026-09-21 04:09:54.026981428 +0000
++++ src-js/dsl.js	2026-09-21 04:14:01.827499152 +0000
+@@ -222,13 +222,32 @@
+   return {success:true, program, errors, warnings};
+ }
+ 
+-export function analyzeReferences(program){
++export function analyzeReferences(program, context){
+   if(!program || !program.instructions) return {analysis:{defined:new Set(), used:new Set(), duplicateDefinitions:[], unknownReferences:[], forwardReferences:[], unusedReferences:[]}, errors:[], warnings:[]};
+   const errors=[];
+   const warnings=[];
+   const defined=new Map();
+   const duplicateDefinitions=[];
+   const used=[];
++  // PHASE 3.13 Checkpoint E (approved Option A): the optional context carries
++  // the §13 PlanningContext snapshot. context.objects (plain object map keyed
++  // by known object id) lets targets name EXISTING document objects — the
++  // '$doc:' Planner-level reference kind (ai.js:718-762). Both the literal
++  // '$doc:<id>' form and the raw <id> (the Planner strips the prefix when
++  // compiling Plan steps to DSL, ai.js:1237) resolve via OWN-PROPERTY reads
++  // only (prototype-safe, mirrors ai.js:744). A context without a usable
++  // objects map keeps the gate closed: nothing resolves and '$doc:' stays
++  // DSL_UNKNOWN_REFERENCE — byte-identical to the pre-E behavior. Doc refs
++  // are EXTERNAL: they never enter the defined set, are exempt from the
++  // forward-reference check, and every other semantic check is unchanged.
++  const docObjects=(context && typeof context==='object' && !Array.isArray(context)
++    && context.objects && typeof context.objects==='object' && !Array.isArray(context.objects))
++    ? context.objects : null;
++  const isDocRef=(ref)=>{
++    if(!docObjects || typeof ref!=='string') return false;
++    const id=ref.startsWith('$doc:') ? ref.slice(5) : ref;
++    return id.length>0 && Object.prototype.hasOwnProperty.call(docObjects, id);
++  };
+   for(let i=0;i<program.instructions.length;i++){
+     const instr=program.instructions[i];
+     if(instr.ref){
+@@ -244,6 +263,7 @@
+   const forwardReferences=[];
+   for(const u of used){
+     if(!defined.has(u.ref)){
++      if(isDocRef(u.ref)) continue; // Checkpoint E: resolves through context.objects
+       unknownReferences.push({ref: u.ref, instructionIndex: u.index});
+       errors.push(createError(DSLErrorCodes.UNKNOWN_REFERENCE, `Unknown reference ${u.ref}`, {ref: u.ref}, u.index, u.ref));
+     } else {
+@@ -267,10 +287,10 @@
+   return {analysis, errors, warnings};
+ }
+ 
+-export function validateSemantics(program){
++export function validateSemantics(program, context){
+   const errors=[];
+   const warnings=[];
+-  const refResult=analyzeReferences(program);
++  const refResult=analyzeReferences(program, context); // Checkpoint E: context threaded through
+   errors.push(...refResult.errors);
+   warnings.push(...refResult.warnings);
+   for(let i=0;i<program.instructions.length;i++){
+@@ -311,8 +331,8 @@
+   return {valid: errors.length===0, errors, warnings};
+ }
+ 
+-export function validateDSL(program){
+-  return validateSemantics(program);
++export function validateDSL(program, context){
++  return validateSemantics(program, context); // Checkpoint E: context threaded through
+ }
+ 
+ export function lintDSL(program){
+@@ -353,7 +373,11 @@
+   return {r:0,g:0,b:0,a:1};
+ }
+ 
+-export function mapToToolIR(node){
++// Checkpoint E: the optional context threads through for reference-aware
++// mapping. Mapping itself is resolution-free BY DESIGN — targets are carried
++// verbatim into the IR (resolution lives in analyzeReferences), which is what
++// makes the Plan -> DSL -> IR round trip target-preserving.
++export function mapToToolIR(node, context){
+   const sourceIndex=node.sourceIndex;
+   const sourceRef=node.ref;
+   switch(node.op){
+@@ -472,12 +496,12 @@
+   }
+ }
+ 
+-export function compileToIR(program){
++export function compileToIR(program, context){
+   const errors=[];
+   const warnings=[];
+   const ir=[];
+   for(const node of program.instructions){
+-    const result=mapToToolIR(node);
++    const result=mapToToolIR(node, context); // Checkpoint E: context threaded through
+     if(result.error) errors.push(result.error);
+     else if(result.ir){
+       // PHASE E Decision 2: one instruction may decompose into multiple tool
+@@ -490,10 +514,10 @@
+   return {success, ir: success? ir : undefined, program, errors, warnings};
+ }
+ 
+-export function compileDSL(program){
+-  const validation=validateDSL(program);
++export function compileDSL(program, context){
++  const validation=validateDSL(program, context); // Checkpoint E: context threaded through
+   if(!validation.valid) return {success:false, errors: validation.errors, warnings: validation.warnings};
+-  const irResult=compileToIR(program);
++  const irResult=compileToIR(program, context);   // Checkpoint E: context threaded through
+   if(!irResult.success) return {success:false, errors: [...validation.errors, ...irResult.errors], warnings: [...validation.warnings, ...irResult.warnings]};
+   return {success:true, ir: irResult.ir, program, errors: validation.errors, warnings: [...validation.warnings, ...irResult.warnings]};
+ }

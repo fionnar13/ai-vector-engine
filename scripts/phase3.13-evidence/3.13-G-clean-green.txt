@@ -1,0 +1,158 @@
+=== PHASE 3.13 Checkpoint A: PlanningErrorCodes (spec §14) ===
+✓ all 11 mandated planning error codes exist
+✓ PlanningError carries code + message and is an Error
+=== Checkpoint A: validateIntent — create (spec §05/§07) ===
+✓ spec §07 create-rectangle example is valid
+✓ missing type -> INVALID_INTENT; unknown type -> UNSUPPORTED_OPERATION
+✓ null / non-object intent -> INVALID_INTENT
+✓ missing objectType -> MISSING_PARAMETER
+✓ unknown objectType -> UNSUPPORTED_OBJECT_TYPE
+✓ missing width/height -> MISSING_PARAMETER
+✓ non-finite numeric values -> INVALID_PARAMETER (spec §07)
+✓ invalid dimensions (<=0) -> INVALID_PARAMETER
+✓ invalid color -> INVALID_PARAMETER
+✓ invalid opacity / placement -> INVALID_PARAMETER
+✓ create ellipse requires rx/ry; unknown keys rejected
+=== Checkpoint A: validateIntent — transform/appearance/alignment/structure (§07) ===
+✓ transform intent: valid translate; unknown operation -> UNSUPPORTED_OPERATION
+✓ appearance intent: fill and/or opacity; neither -> MISSING_PARAMETER
+✓ alignment intent: mode must be valid for axis (T08 rules, tools.js:399-402)
+✓ structure intent: group/ungroup only
+=== Checkpoint A: ExpectedState (spec §08/§09) ===
+✓ buildExpectedState: mechanical derivation for create rect (requested, not measured)
+✓ buildExpectedState: rx/ry default to 0 (symmetric true) when omitted
+✓ buildExpectedState: appearance / alignment / structure intents map their sections
+✓ validateExpectedState rejects missing sections / bad status / function values
+=== Checkpoint A: Plan / PlanStep (spec §10/§16) ===
+✓ makePlanStep + validatePlanStep
+✓ makePlan: §10 shape {id, intentId, steps, expectedState, deterministic, parentPlanId}
+✓ §16 determinism: identical intent + steps -> identical plan id + intentId
+✓ validatePlanStructure rejections: empty steps, deterministic=false, bad step, bad state
+=== Checkpoint A: PlanningContext (spec §13) ===
+✓ createPlanningContext: deep-frozen plain-data projection
+✓ createPlanningContext rejects function values (no mutation methods can be exposed, §13)
+✓ createPlanningContext rejects non-object input
+=== Checkpoint A: static determinism + security scan of src-js/ai.js (§05/§16/§26 precedent) ===
+✓ planner source is free of nondeterminism and forbidden capabilities
+=== Checkpoint B: fixtures (spec §20 vertical-slice intent) ===
+=== Checkpoint B: createExpectedState (spec §08/§15) ===
+✓ B: createExpectedState returns a deep-frozen, valid ExpectedState equal to buildExpectedState
+✓ B: createExpectedState throws PlanningError for an invalid intent (top-level INVALID_INTENT, specific code in details — buildExpectedState contract, ai.js:341)
+✓ B: createExpectedState rejects a mutable (non-frozen) context and a non-object context (§13)
+✓ B: createExpectedState works without a context (context optional at Checkpoint B)
+=== Checkpoint B: createPlan — Rules A/B/C/D on create intents (§12/§17/§20) ===
+✓ B: §20 slice plan = T01 geometry-only -> T07 fill -> T08 both/center (12/§20)
+✓ B: Rule C — T01 receives NO fill key; rx AND ry both present (deviation 5)
+✓ B: Rule B — center math per tool anchor: rect x/y top-left, ellipse cx/cy center
+✓ B: placement origin/absent — explicit x/y passthrough (tool anchor semantics), default 0,0
+✓ B: create + fill + opacity -> opacity rides the T07 step (tools.js:372)
+✓ B: opacity-only create (no fill) -> NO_VALID_PLAN (T07 opacity-only needs an existing fill item, tools.js:377)
+✓ B: placement center + explicit x/y -> INVALID_PARAMETER (conflict; Planner computes placement)
+✓ B: placement center without artboard in context -> MISSING_PARAMETER
+✓ B: artboard with non-finite centerX/centerY -> INVALID_PARAMETER
+✓ C: B-era boundary SUPERSEDED — non-create intents now plan via Rules E/F/G/H (spec §41-C)
+✓ B: invalid intent -> INVALID_INTENT; mutable context -> INVALID_PARAMETER; plan frozen + valid
+✓ B: non-finite x/y on a create intent (validator hole for absent placement) caught at plan time
+=== Checkpoint B: validatePlan (spec §18) ===
+✓ B: valid slice plan passes with a frozen context; verdict object shape
+✓ B: PLANNER RULE — centered ExpectedState without a T08 step -> PLAN_INVALID (spec §20 mandate)
+✓ B: PLANNER RULE — T08 present but axis/mode not both/center -> PLAN_INVALID
+✓ B: dependency references — unknown $ref and forward $ref -> PLAN_INVALID
+✓ B: dependency convention — objectIds entries must use the $stepId form
+✓ B: duplicate step ids -> PLAN_INVALID
+✓ B: structural garbage + context contract (non-frozen context throws PlanningError)
+=== Checkpoint B: compilePlanToDSL (spec §23/§24) ===
+✓ B: slice plan -> DSL [create, appearance, align]; no fill inside the create args (Rule C)
+✓ B: §24 round trip — Plan -> compilePlanToDSL -> parseDSL -> validateDSL -> compileToIR (same ops + deps)
+✓ B: ellipse plan compiles to create/ellipse with cx/cy/rx/ry
+✓ B: compilePlanToDSL guards — unknown toolId, non-solid fill, empty T07, missing objectIds, invalid plan
+=== Checkpoint B: §16 determinism proof (mandatory) ===
+✓ B: same intent + same context, two runs -> ExpectedState JSON.stringify byte-identical
+✓ B: same intent + same context, two runs -> Plan JSON.stringify byte-identical (no Date.now/Math.random/randomUUID)
+✓ B: same intent + same context, two runs -> compiled DSL JSON.stringify byte-identical
+✓ B: key-order-permuted intent -> identical intentId/plan id (content-derived identity)
+=== Checkpoint C: fixtures (§13 snapshot with known object ids — declared with the B fixtures above) ===
+=== Checkpoint C: Rule E — Transform (§17-E) ===
+✓ C-E: translate -> single T05 move_object step with $doc: refs + finite delta (tools.js:308-325)
+✓ C-E: multi-target translate -> ONE T05 step carrying all targets (T05 objectIds is array-capable, tools.js:309)
+✓ C-E: scale -> T06 with the diagonal matrix resolved at plan time (mirrors dsl.js:420-424)
+✓ C-E: rotate -> T06 with the origin-rotation matrix, EXACTLY the substrate expressions (dsl.js:425-428)
+✓ C-E: matrix -> T06 passthrough of the validated affine matrix
+✓ C-E: unknown target -> INVALID_PARAMETER naming the target (Planner never guesses identities)
+✓ C-E: missing context / context.objects missing or not a plain map -> MISSING_PARAMETER
+✓ C-E: duplicate targets -> INVALID_PARAMETER (a duplicated target would double-apply the operation)
+✓ C-E: transform ExpectedState keeps geometry null (execution-dependent); plan validates against the snapshot
+✓ C-E: compilePlanToDSL -> the EXISTING transform op syntax for all four operations (§23: no second DSL)
+✓ C-E: IR round trip — parse + compileToIR yield T05/T06 with plan-matching inputs and targets
+✓ C-E: substrate boundary PINNED — validateDSL flags doc-object targets as UNKNOWN_REFERENCE (analyzeReferences dsl.js:225-268 only knows program-internal refs; resolution is Checkpoint E agenda)
+✓ C-E: determinism — same intent + same context, two runs -> ExpectedState/Plan/DSL byte-identical (§16)
+=== Checkpoint C: Rule F — Appearance (§17-F) ===
+✓ C-F: fill-only appearance -> single T07 step with the real T07 contract {kind:solid,color}
+✓ C-F: fill + opacity -> both ride the T07 step (tools.js:370-374)
+✓ C-F: opacity-only on an EXISTING object is plannable (unlike create: T07 fill-item precondition tools.js:377 is tool-level and CAN succeed here)
+✓ C-F: multi-target appearance -> ONE T07 step PER target (DSL appearance op is single-target, dsl.js:114) — lossless mapping
+✓ C-F: unknown target -> INVALID_PARAMETER
+✓ C-F: compilePlanToDSL -> per-target appearance instructions (§23 syntax)
+✓ C-F: IR round trip — T07 chain with canonical RGB fill (deviation 4)
+✓ C-F: determinism — two runs byte-identical (§16)
+=== Checkpoint C: Rule G — Alignment (§17-G) ===
+✓ C-G: alignment -> ONE T08 step, axis/mode passthrough (T08 + DSL align are array-capable, dsl.js:139-142)
+✓ C-G: single-target align allowed (documented no-op success precedent, tools.js:393-395)
+✓ C-G: invalid axis/mode combination rejected at intent level (top-level INVALID_INTENT, Checkpoint A contract)
+✓ C-G: compilePlanToDSL -> align instruction + IR round trip T08
+✓ C-G: determinism — two runs byte-identical (§16)
+=== Checkpoint C: Rule H — Structure (§17-H) ===
+✓ C-H: group 2 targets -> ONE T10 step (T10 objectIds>=2, tools.js:490)
+✓ C-H: group 3 targets -> one step, three $doc refs
+✓ C-H: group with 1 target -> NO_VALID_PLAN (approved decision (a): a plan that cannot succeed must not be produced; T10 needs >=2)
+✓ C-H: ungroup 1 target -> ONE T11 step (T11 inputs are group node ids, tools.js:517-525)
+✓ C-H: ungroup 2 targets -> TWO T11 steps (DSL ungroup is single-target, dsl.js:121) — lossless
+✓ C-H: unknown target / duplicate targets -> INVALID_PARAMETER
+✓ C-H: compilePlanToDSL -> group/ungroup instructions + IR round trip T10/T11
+✓ C-H: determinism — two runs byte-identical (§16)
+=== Checkpoint C: $doc: reference convention in validatePlan (§18 extension) ===
+✓ C-X: $doc: ref to an object missing from the snapshot -> PLAN_INVALID naming the ref
+✓ C-X: $doc: refs WITHOUT a context cannot resolve -> PLAN_INVALID (strict, never silently skipped)
+✓ C-X: resolvable $doc: refs validate clean; $step refs unaffected (both kinds coexist)
+=== Checkpoint D: fixtures (spec §41-D) ===
+✓ D-1: every toolId of every planner-generated plan resolves in the live Tool Registry (resolution mandate)
+✓ D-2: unknown toolId -> TOOL_NOT_FOUND in the validatePlan verdict
+✓ D-3: category validation — read (T16) / proposal (T19) tools are NOT plannable (Planner rule, revisitable)
+✓ D-4: input validation against the tool DECLARED inputSchema (missing key / wrong type / non-finite / object type)
+✓ D-5: undeclared-but-accepted inputs stay valid (live schemas under-declare executor params; tools.js:232/240)
+✓ D-6: mutation tools are planned but NEVER executed during planning (spec §41-D boundary)
+✓ D-7: registry is read-only from the Planner perspective (frozen projection + frozen defs + unchanged metadata)
+✓ D-8: registry injection is pure DI — identical output, determinism preserved (§16)
+✓ D-9: registry-contract diagnostics — unknown category / missing inputSchema / malformed facade fail loudly
+=== Checkpoint E: substrate extension — analyzeReferences(program, context?) ===
+✓ E-1: $doc:<id> literal targets resolve through context.objects (own-key check)
+✓ E-2: raw-id targets (the Planner-stripped form, ai.js:1237) resolve through context.objects
+✓ E-3: context ABSENT -> $doc: and raw ids stay DSL_UNKNOWN_REFERENCE (pre-E behavior pinned)
+✓ E-4: with a context present, targets NOT in context.objects stay unknown (fail-loud; the substrate never guesses — §24 analog)
+✓ E-5: prototype-safe reads — $doc:toString / $doc:constructor / __proto__ never resolve (own-property only, mirrors ai.js:744)
+✓ E-6: malformed context keeps the gate CLOSED (objects array / missing objects / non-object context) — fail-loud via the unknown-ref error, never silently accepted
+✓ E-7: validateDSL threads the context — doc-referencing program invalid without, valid with; other semantic checks stay enforced
+✓ E-8: compileDSL threads the context — doc-referencing program compiles with context, fails without
+✓ E-9: compileToIR(program, context) is threading-neutral — identical IR with and without a context (mapping is resolution-free; targets carried verbatim)
+✓ E-10: program-internal programs validate identically with and without a context (substrate extension is verdict-neutral for §23-style programs)
+=== Checkpoint E: full round trip — Plan -> compilePlanToDSL -> parseDSL -> validateDSL(context) -> compileToIR ===
+✓ E-RT Rule E: translate T05 + scale T06 — $doc: targets survive validateDSL with context; same toolIds/inputs/targets
+✓ E-RT Rule F: appearance T07 chain — $doc: targets round trip with context (multi-target, fill + opacity)
+✓ E-RT Rule G: align T08 — $doc: targets round trip with context
+✓ E-RT Rule H: group T10 + ungroup T11 — $doc: targets round trip with context
+✓ E-RT Rules A-D: create plans round trip WITH a context passed (self-contained programs; threading must not disturb the T01/T02 -> T07 -> T08 chains)
+=== Checkpoint F: mandatory vertical slice (spec §41-F) ===
+
+=== PHASE 3.13 Checkpoint G: Architecture Tests (spec §26/§41-G) ===
+✓ G-1: import contract — the Planner imports exactly ONE substrate module (./tools.js); every specifier relative; no fs, no node: builtin, no bare npm specifier
+✓ G-2: Planner code reaches no browser/DOM global and no network — window, document, fetch (§41-G), scanned on the comment/string-stripped code body
+✓ G-3: Planner code reaches no dynamic code execution and no Node escape hatch — eval, Function, require(, import(, globalThis, process, fs
+✓ G-4: Planner code calls no substrate mutation method — Store.write, Transaction.execute/commit/rollback, registry register/unregister, Renderer render/invalidate, SpatialIndex insert/remove/update/delete are structurally unreachable (§26: the only mutation path is Plan -> DSL -> Tool Registry -> Transaction -> Commit, executed by the substrate, never by the Planner)
+✓ G-5: zero npm dependencies added — package.json declares no dependency fields and every src-js runtime module imports only relative specifiers
+✓ G-6: scan-harness sanity (anti-vacuity) — the stripper demonstrably removes comments/strings and preserves code 1:1, so G-2/G-3/G-4 cannot pass vacuously
+✓ F-S1: BEFORE PLANNING — canonical stores + history.size() + SpatialIndex + RenderTree captured as deterministic JSON (fresh document)
+✓ F-S2: AFTER PLANNING / BEFORE EXECUTION — the planning chain ran, NO transaction executed: stores byte-identical, history unchanged, SpatialIndex NOT invalidated, RenderTree NOT invalidated (the Planner is read-only)
+✓ F-S3: DURING EXECUTION — Plan->DSL->Tool Registry->tool validation->Transaction->Commit through the REAL substrate: history grows by exactly the executed step count, TransactionCommitted emitted per commit
+✓ F-S4: AFTER COMMIT — object/geometry/appearance final state, WorldBBox center === artboard center (1e-9), SpatialIndex + RenderTree invalidated
+
+Tests: 131 total, 131 passed, 0 failed

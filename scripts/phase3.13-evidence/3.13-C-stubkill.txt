@@ -1,0 +1,70 @@
+== [1] snapshot pristine ai.js ==
+sha256(before) = b19440a9eae14d35a5a49d3c51614b5051a6716e2b93d32161338de044df0ff6
+== [2] RUN 1: neuter dispatchNonCreateRules (throw on entry) ==
+dispatchNonCreateRules neutered (throws on entry)
+== [3] run tests against the neutered rules dispatch ==
+Tests: 97 total, 63 passed, 34 failed
+neutered-run-1 exit=1 (expect 1)
+run-1 failing tests: 34
+  ✗ C: B-era boundary SUPERSEDED — non-create intents now plan via Rules E/F/G/H (spec §41-C): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-E: translate -> single T05 move_object step with $doc: refs + finite delta (tools.js:308-325): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-E: multi-target translate -> ONE T05 step carrying all targets (T05 objectIds is array-capable, tools.js:309): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-E: scale -> T06 with the diagonal matrix resolved at plan time (mirrors dsl.js:420-424): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-E: rotate -> T06 with the origin-rotation matrix, EXACTLY the substrate expressions (dsl.js:425-428): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-E: matrix -> T06 passthrough of the validated affine matrix: STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-E: unknown target -> INVALID_PARAMETER naming the target (Planner never guesses identities): ghost target
+  ✗ C-E: missing context / context.objects missing or not a plain map -> MISSING_PARAMETER: no context at all
+  ✗ C-E: duplicate targets -> INVALID_PARAMETER (a duplicated target would double-apply the operation): duplicate
+  ✗ C-E: transform ExpectedState keeps geometry null (execution-dependent); plan validates against the snapshot: STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-E: compilePlanToDSL -> the EXISTING transform op syntax for all four operations (§23: no second DSL): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-E: IR round trip — parse + compileToIR yield T05/T06 with plan-matching inputs and targets: STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-E: substrate boundary PINNED — validateDSL flags doc-object targets as UNKNOWN_REFERENCE (analyzeReferences dsl.js:225-268 only knows program-internal refs; resolution is Checkpoint E agenda): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-E: determinism — same intent + same context, two runs -> ExpectedState/Plan/DSL byte-identical (§16): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-F: fill-only appearance -> single T07 step with the real T07 contract {kind:solid,color}: STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-F: fill + opacity -> both ride the T07 step (tools.js:370-374): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-F: opacity-only on an EXISTING object is plannable (unlike create: T07 fill-item precondition tools.js:377 is tool-level and CAN succeed here): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-F: multi-target appearance -> ONE T07 step PER target (DSL appearance op is single-target, dsl.js:114) — lossless mapping: STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-F: unknown target -> INVALID_PARAMETER: ghost
+  ✗ C-F: compilePlanToDSL -> per-target appearance instructions (§23 syntax): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-F: IR round trip — T07 chain with canonical RGB fill (deviation 4): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-F: determinism — two runs byte-identical (§16): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-G: alignment -> ONE T08 step, axis/mode passthrough (T08 + DSL align are array-capable, dsl.js:139-142): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-G: single-target align allowed (documented no-op success precedent, tools.js:393-395): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-G: compilePlanToDSL -> align instruction + IR round trip T08: STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-G: determinism — two runs byte-identical (§16): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-H: group 2 targets -> ONE T10 step (T10 objectIds>=2, tools.js:490): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-H: group 3 targets -> one step, three $doc refs: STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-H: group with 1 target -> NO_VALID_PLAN (approved decision (a): a plan that cannot succeed must not be produced; T10 needs >=2): single-target group
+  ✗ C-H: ungroup 1 target -> ONE T11 step (T11 inputs are group node ids, tools.js:517-525): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-H: ungroup 2 targets -> TWO T11 steps (DSL ungroup is single-target, dsl.js:121) — lossless: STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-H: unknown target / duplicate targets -> INVALID_PARAMETER: ghost
+  ✗ C-H: compilePlanToDSL -> group/ungroup instructions + IR round trip T10/T11: STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+  ✗ C-H: determinism — two runs byte-identical (§16): STUB-KILL: dispatchNonCreateRules neutered for the Checkpoint C stub-kill proof (spec 28/29)
+== [4] restore pristine ai.js ==
+restore sha256 after run 1: OK
+== [5] RUN 2: neuter the dollar-doc skip in checkStepReferences ==
+'$doc:' skip neutered (doc refs treated as step refs)
+== [6] run tests against the neutered doc-ref handling ==
+Tests: 97 total, 84 passed, 13 failed
+neutered-run-2 exit=1 (expect 1)
+run-2 failing tests: 13
+  ✗ C-E: transform ExpectedState keeps geometry null (execution-dependent); plan validates against the snapshot: [{"code":"PLAN_INVALID","message":"unknown reference '$doc:rect-1' at steps[0].input.objectIds[0] (§18)","details":{"ref":"doc:rect-1","path":"steps[0].input.objectIds[0]","stepIndex":0}}]
+  ✗ C-E: compilePlanToDSL -> the EXISTING transform op syntax for all four operations (§23: no second DSL): compilePlanToDSL requires resolvable step dependency references (§18)
+  ✗ C-E: IR round trip — parse + compileToIR yield T05/T06 with plan-matching inputs and targets: compilePlanToDSL requires resolvable step dependency references (§18)
+  ✗ C-E: substrate boundary PINNED — validateDSL flags doc-object targets as UNKNOWN_REFERENCE (analyzeReferences dsl.js:225-268 only knows program-internal refs; resolution is Checkpoint E agenda): compilePlanToDSL requires resolvable step dependency references (§18)
+  ✗ C-E: determinism — same intent + same context, two runs -> ExpectedState/Plan/DSL byte-identical (§16): compilePlanToDSL requires resolvable step dependency references (§18)
+  ✗ C-F: compilePlanToDSL -> per-target appearance instructions (§23 syntax): compilePlanToDSL requires resolvable step dependency references (§18)
+  ✗ C-F: IR round trip — T07 chain with canonical RGB fill (deviation 4): compilePlanToDSL requires resolvable step dependency references (§18)
+  ✗ C-F: determinism — two runs byte-identical (§16): compilePlanToDSL requires resolvable step dependency references (§18)
+  ✗ C-G: compilePlanToDSL -> align instruction + IR round trip T08: compilePlanToDSL requires resolvable step dependency references (§18)
+  ✗ C-G: determinism — two runs byte-identical (§16): compilePlanToDSL requires resolvable step dependency references (§18)
+  ✗ C-H: compilePlanToDSL -> group/ungroup instructions + IR round trip T10/T11: compilePlanToDSL requires resolvable step dependency references (§18)
+  ✗ C-H: determinism — two runs byte-identical (§16): compilePlanToDSL requires resolvable step dependency references (§18)
+  ✗ C-X: resolvable $doc: refs validate clean; $step refs unaffected (both kinds coexist): doc ref resolves
+== [7] restore pristine ai.js (final) ==
+sha256(after)  = b19440a9eae14d35a5a49d3c51614b5051a6716e2b93d32161338de044df0ff6
+restore sha256 after run 2: OK
+== [8] re-run tests on the restored file ==
+Tests: 97 total, 97 passed, 0 failed
+restored-run exit=0 (expect 0)
+STUB-KILL PROOF: PASS (Rules E-H dispatch is load-bearing: 34 tests failed while neutered; dollar-doc resolution is load-bearing: 13 tests failed while neutered; 97/97 after restore)

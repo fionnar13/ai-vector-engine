@@ -1,0 +1,12 @@
+tests/semantic.test.mjs                    Tests: 49 total, 49 passed, 0 failed [OK]
+tests/spatial-index.test.mjs               Tests: 13 total, 13 passed, 0 failed [OK]
+tests/stores.test.mjs                      Tests: 19 total, 19 passed, 0 failed [OK]
+tests/tools.test.mjs                       Tests: 84 total, 84 passed, 0 failed [OK]
+tests/transaction.test.mjs                 Tests: 32 total, 32 passed, 0 failed [OK]
+COUNTED SUITE: 645 passed / 0 failed (of 645)
+--- standalone gates ---
+gate PASS: tests/geometry.test.js
+gate PASS: tests/architecture.test.mjs
+gate PASS: tests/architecture-phase3.04.mjs
+gate PASS: tests/run-js.js
+gate PASS: src-js/run.js (dsl vertical slice)

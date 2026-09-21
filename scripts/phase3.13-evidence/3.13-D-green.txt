@@ -1,0 +1,4 @@
+✓ D-8: registry injection is pure DI — identical output, determinism preserved (§16)
+✓ D-9: registry-contract diagnostics — unknown category / missing inputSchema / malformed facade fail loudly
+
+Tests: 106 total, 106 passed, 0 failed

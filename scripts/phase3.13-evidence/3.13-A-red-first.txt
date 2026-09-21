@@ -1,0 +1,38 @@
+PHASE 3.13 — CHECKPOINT A, RED-FIRST EVIDENCE (spec §28 steps 1-3)
+====================================================================
+Command:  node tests/ai.test.mjs
+Moment:   AFTER writing tests/ai.test.mjs, BEFORE creating src-js/ai.js
+(greenfield module — the test file imports from '../src-js/ai.js', which
+did not exist at this point; 3.13-0/3.13-1 proved ai.js never existed on
+any ref. Transcription of the captured terminal output, verbatim.)
+
+--- captured output -----------------------------------------------------
+node:internal/modules/esm/resolve:272
+    throw new ERR_MODULE_NOT_FOUND(
+          ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/home/z/my-project/ai-vector-engine/src-js/ai.js' imported from /home/z/my-project/ai-vector-engine/tests/ai.test.mjs
+    at finalizeResolution (node:internal/modules/esm/resolve:272:11) {
+  code: 'ERR_MODULE_NOT_FOUND',
+  url: 'file:///home/z/my-project/ai-vector-engine/src-js/ai.js'
+}
+
+Node.js v24.21.0
+EXIT=1
+--- end captured output -------------------------------------------------
+
+Subsequent steps (§28 4-6):
+- src-js/ai.js implemented (Checkpoint A scope).
+- node tests/ai.test.mjs -> Tests: 29 total, 29 passed, 0 failed, exit 0.
+- Stub-kill (§28 step 7 / §29): scripts/phase3.13-evidence/run-stubkill-
+  checkpointA.sh neuters validateIntent; result 17 passed / 12 failed
+  (exit 1); pristine restore sha256-verified (ai.js.checkpointA.sha256);
+  post-restore 29 passed / 0 failed. Transcript: 3.13-A-stubkill.txt.
+
+NOTE (incident disclosure): the FIRST attempt to run the stub-kill script
+failed harmlessly — the script's cd resolved one directory short, so every
+command (including the stub) hit FILE-NOT-FOUND and src-js/ai.js was never
+modified. Integrity verified post-incident: sha256sum -c -> OK, suite
+29/29. Script fixed (dirname/.. -> dirname/../..) and re-run cleanly.
+Transcript of the failed attempt was overwritten by the clean re-run by
+design; the incident is disclosed here per house transparency rules.

@@ -1,0 +1,184 @@
+=== PHASE 3.13 Checkpoint A: PlanningErrorCodes (spec §14) ===
+✓ all 11 mandated planning error codes exist
+✓ PlanningError carries code + message and is an Error
+=== Checkpoint A: validateIntent — create (spec §05/§07) ===
+✓ spec §07 create-rectangle example is valid
+✓ missing type -> INVALID_INTENT; unknown type -> UNSUPPORTED_OPERATION
+✓ null / non-object intent -> INVALID_INTENT
+✓ missing objectType -> MISSING_PARAMETER
+✓ unknown objectType -> UNSUPPORTED_OBJECT_TYPE
+✓ missing width/height -> MISSING_PARAMETER
+✓ non-finite numeric values -> INVALID_PARAMETER (spec §07)
+✓ invalid dimensions (<=0) -> INVALID_PARAMETER
+✓ invalid color -> INVALID_PARAMETER
+✓ invalid opacity / placement -> INVALID_PARAMETER
+✓ create ellipse requires rx/ry; unknown keys rejected
+=== Checkpoint A: validateIntent — transform/appearance/alignment/structure (§07) ===
+✓ transform intent: valid translate; unknown operation -> UNSUPPORTED_OPERATION
+✓ appearance intent: fill and/or opacity; neither -> MISSING_PARAMETER
+✓ alignment intent: mode must be valid for axis (T08 rules, tools.js:399-402)
+✓ structure intent: group/ungroup only
+=== Checkpoint A: ExpectedState (spec §08/§09) ===
+✓ buildExpectedState: mechanical derivation for create rect (requested, not measured)
+✓ buildExpectedState: rx/ry default to 0 (symmetric true) when omitted
+✓ buildExpectedState: appearance / alignment / structure intents map their sections
+✓ validateExpectedState rejects missing sections / bad status / function values
+=== Checkpoint A: Plan / PlanStep (spec §10/§16) ===
+✓ makePlanStep + validatePlanStep
+✓ makePlan: §10 shape {id, intentId, steps, expectedState, deterministic, parentPlanId}
+✓ §16 determinism: identical intent + steps -> identical plan id + intentId
+✓ validatePlanStructure rejections: empty steps, deterministic=false, bad step, bad state
+=== Checkpoint A: PlanningContext (spec §13) ===
+✓ createPlanningContext: deep-frozen plain-data projection
+✓ createPlanningContext rejects function values (no mutation methods can be exposed, §13)
+✓ createPlanningContext rejects non-object input
+=== Checkpoint A: static determinism + security scan of src-js/ai.js (§05/§16/§26 precedent) ===
+✓ planner source is free of nondeterminism and forbidden capabilities
+=== Checkpoint B: fixtures (spec §20 vertical-slice intent) ===
+=== Checkpoint B: createExpectedState (spec §08/§15) ===
+✓ B: createExpectedState returns a deep-frozen, valid ExpectedState equal to buildExpectedState
+✓ B: createExpectedState throws PlanningError for an invalid intent (top-level INVALID_INTENT, specific code in details — buildExpectedState contract, ai.js:341)
+✓ B: createExpectedState rejects a mutable (non-frozen) context and a non-object context (§13)
+✓ B: createExpectedState works without a context (context optional at Checkpoint B)
+=== Checkpoint B: createPlan — Rules A/B/C/D on create intents (§12/§17/§20) ===
+✓ B: §20 slice plan = T01 geometry-only -> T07 fill -> T08 both/center (12/§20)
+✓ B: Rule C — T01 receives NO fill key; rx AND ry both present (deviation 5)
+✓ B: Rule B — center math per tool anchor: rect x/y top-left, ellipse cx/cy center
+✓ B: placement origin/absent — explicit x/y passthrough (tool anchor semantics), default 0,0
+✓ B: create + fill + opacity -> opacity rides the T07 step (tools.js:372)
+✓ B: opacity-only create (no fill) -> NO_VALID_PLAN (T07 opacity-only needs an existing fill item, tools.js:377)
+✓ B: placement center + explicit x/y -> INVALID_PARAMETER (conflict; Planner computes placement)
+✓ B: placement center without artboard in context -> MISSING_PARAMETER
+✓ B: artboard with non-finite centerX/centerY -> INVALID_PARAMETER
+✓ C: B-era boundary SUPERSEDED — non-create intents now plan via Rules E/F/G/H (spec §41-C)
+✓ B: invalid intent -> INVALID_INTENT; mutable context -> INVALID_PARAMETER; plan frozen + valid
+✓ B: non-finite x/y on a create intent (validator hole for absent placement) caught at plan time
+=== Checkpoint B: validatePlan (spec §18) ===
+✓ B: valid slice plan passes with a frozen context; verdict object shape
+✓ B: PLANNER RULE — centered ExpectedState without a T08 step -> PLAN_INVALID (spec §20 mandate)
+✓ B: PLANNER RULE — T08 present but axis/mode not both/center -> PLAN_INVALID
+✓ B: dependency references — unknown $ref and forward $ref -> PLAN_INVALID
+✓ B: dependency convention — objectIds entries must use the $stepId form
+✓ B: duplicate step ids -> PLAN_INVALID
+✓ B: structural garbage + context contract (non-frozen context throws PlanningError)
+=== Checkpoint B: compilePlanToDSL (spec §23/§24) ===
+✓ B: slice plan -> DSL [create, appearance, align]; no fill inside the create args (Rule C)
+✓ B: §24 round trip — Plan -> compilePlanToDSL -> parseDSL -> validateDSL -> compileToIR (same ops + deps)
+✓ B: ellipse plan compiles to create/ellipse with cx/cy/rx/ry
+✓ B: compilePlanToDSL guards — unknown toolId, non-solid fill, empty T07, missing objectIds, invalid plan
+=== Checkpoint B: §16 determinism proof (mandatory) ===
+✓ B: same intent + same context, two runs -> ExpectedState JSON.stringify byte-identical
+✓ B: same intent + same context, two runs -> Plan JSON.stringify byte-identical (no Date.now/Math.random/randomUUID)
+✓ B: same intent + same context, two runs -> compiled DSL JSON.stringify byte-identical
+✓ B: key-order-permuted intent -> identical intentId/plan id (content-derived identity)
+=== Checkpoint C: fixtures (§13 snapshot with known object ids — declared with the B fixtures above) ===
+=== Checkpoint C: Rule E — Transform (§17-E) ===
+✓ C-E: translate -> single T05 move_object step with $doc: refs + finite delta (tools.js:308-325)
+✓ C-E: multi-target translate -> ONE T05 step carrying all targets (T05 objectIds is array-capable, tools.js:309)
+✓ C-E: scale -> T06 with the diagonal matrix resolved at plan time (mirrors dsl.js:420-424)
+✓ C-E: rotate -> T06 with the origin-rotation matrix, EXACTLY the substrate expressions (dsl.js:425-428)
+✓ C-E: matrix -> T06 passthrough of the validated affine matrix
+✓ C-E: unknown target -> INVALID_PARAMETER naming the target (Planner never guesses identities)
+✓ C-E: missing context / context.objects missing or not a plain map -> MISSING_PARAMETER
+✓ C-E: duplicate targets -> INVALID_PARAMETER (a duplicated target would double-apply the operation)
+✓ C-E: transform ExpectedState keeps geometry null (execution-dependent); plan validates against the snapshot
+✓ C-E: compilePlanToDSL -> the EXISTING transform op syntax for all four operations (§23: no second DSL)
+✓ C-E: IR round trip — parse + compileToIR yield T05/T06 with plan-matching inputs and targets
+✓ C-E: substrate boundary PINNED — validateDSL flags doc-object targets as UNKNOWN_REFERENCE (analyzeReferences dsl.js:225-268 only knows program-internal refs; resolution is Checkpoint E agenda)
+✓ C-E: determinism — same intent + same context, two runs -> ExpectedState/Plan/DSL byte-identical (§16)
+=== Checkpoint C: Rule F — Appearance (§17-F) ===
+✓ C-F: fill-only appearance -> single T07 step with the real T07 contract {kind:solid,color}
+✓ C-F: fill + opacity -> both ride the T07 step (tools.js:370-374)
+✓ C-F: opacity-only on an EXISTING object is plannable (unlike create: T07 fill-item precondition tools.js:377 is tool-level and CAN succeed here)
+✓ C-F: multi-target appearance -> ONE T07 step PER target (DSL appearance op is single-target, dsl.js:114) — lossless mapping
+✓ C-F: unknown target -> INVALID_PARAMETER
+✓ C-F: compilePlanToDSL -> per-target appearance instructions (§23 syntax)
+✓ C-F: IR round trip — T07 chain with canonical RGB fill (deviation 4)
+✓ C-F: determinism — two runs byte-identical (§16)
+=== Checkpoint C: Rule G — Alignment (§17-G) ===
+✓ C-G: alignment -> ONE T08 step, axis/mode passthrough (T08 + DSL align are array-capable, dsl.js:139-142)
+✓ C-G: single-target align allowed (documented no-op success precedent, tools.js:393-395)
+✓ C-G: invalid axis/mode combination rejected at intent level (top-level INVALID_INTENT, Checkpoint A contract)
+✓ C-G: compilePlanToDSL -> align instruction + IR round trip T08
+✓ C-G: determinism — two runs byte-identical (§16)
+=== Checkpoint C: Rule H — Structure (§17-H) ===
+✓ C-H: group 2 targets -> ONE T10 step (T10 objectIds>=2, tools.js:490)
+✓ C-H: group 3 targets -> one step, three $doc refs
+✓ C-H: group with 1 target -> NO_VALID_PLAN (approved decision (a): a plan that cannot succeed must not be produced; T10 needs >=2)
+✓ C-H: ungroup 1 target -> ONE T11 step (T11 inputs are group node ids, tools.js:517-525)
+✓ C-H: ungroup 2 targets -> TWO T11 steps (DSL ungroup is single-target, dsl.js:121) — lossless
+✓ C-H: unknown target / duplicate targets -> INVALID_PARAMETER
+✓ C-H: compilePlanToDSL -> group/ungroup instructions + IR round trip T10/T11
+✓ C-H: determinism — two runs byte-identical (§16)
+=== Checkpoint C: $doc: reference convention in validatePlan (§18 extension) ===
+✓ C-X: $doc: ref to an object missing from the snapshot -> PLAN_INVALID naming the ref
+✓ C-X: $doc: refs WITHOUT a context cannot resolve -> PLAN_INVALID (strict, never silently skipped)
+✓ C-X: resolvable $doc: refs validate clean; $step refs unaffected (both kinds coexist)
+=== Checkpoint D: fixtures (spec §41-D) ===
+✓ D-1: every toolId of every planner-generated plan resolves in the live Tool Registry (resolution mandate)
+✗ D-2: unknown toolId -> TOOL_NOT_FOUND in the validatePlan verdict: plan referencing T99 must be invalid
+Error: plan referencing T99 must be invalid
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:825:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:823:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ D-3: category validation — read (T16) / proposal (T19) tools are NOT plannable (Planner rule, revisitable): read tool step must be rejected
+Error: read tool step must be rejected
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:831:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:829:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ D-4: input validation against the tool DECLARED inputSchema (missing key / wrong type / non-finite / object type): missing required width
+Error: missing required width
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:841:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:839:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ D-5: undeclared-but-accepted inputs stay valid (live schemas under-declare executor params; tools.js:232/240): schema-validated plan must still resolve through the registry
+Error: schema-validated plan must still resolve through the registry
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:859:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:852:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ D-6: mutation tools are planned but NEVER executed during planning (spec §41-D boundary): create: resolution must consult the registry facade
+Error: create: resolution must consult the registry facade
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:869:5
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:861:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ D-7: registry is read-only from the Planner perspective (frozen projection + frozen defs + unchanged metadata)
+✗ D-8: registry injection is pure DI — identical output, determinism preserved (§16): createPlan post-condition must consult the injected registry
+Error: createPlan post-condition must consult the injected registry
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:889:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:884:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ D-9: registry-contract diagnostics — unknown category / missing inputSchema / malformed facade fail loudly: unknown category must be rejected
+Error: unknown category must be rejected
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:903:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:893:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Tests: 106 total, 99 passed, 7 failed

@@ -1,0 +1,28 @@
+== pre-kill hash ==
+e3df6696dd828f67ccd6dd39ccaa270ae1fae1f67a8d1b6596800846cf0cfb6e
+== KILL 1 applied ==
+== KILL 1 run ==
+✗ G-1: import contract — the Planner imports exactly ONE substrate module (./tools.js); every specifier relative; no fs, no node: builtin, no bare npm specifier: non-relative import specifier 'node:fs' in the Planner (fs / node: builtins / bare npm specifiers are forbidden, §41-G)
+✗ G-3: Planner code reaches no dynamic code execution and no Node escape hatch — eval, Function, require(, import(, globalThis, process, fs: Planner -> fs is FORBIDDEN (§41-G) — matched ["fs","fs"]
+✗ G-5: zero npm dependencies added — package.json declares no dependency fields and every src-js runtime module imports only relative specifiers: src-js/ai.js imports 'node:fs' — a non-relative (npm package / node builtin) specifier would add a dependency
+Tests: 131 total, 128 passed, 3 failed
+kill1 exit: 1 (expect 1)
+RESTORE OK (e3df6696dd828f67ccd6dd39ccaa270ae1fae1f67a8d1b6596800846cf0cfb6e)
+== KILL 2 applied ==
+== KILL 2 run ==
+✗ G-2: Planner code reaches no browser/DOM global and no network — window, document, fetch (§41-G), scanned on the comment/string-stripped code body: Planner -> window is FORBIDDEN (§41-G) — matched ["window"]
+✗ G-3: Planner code reaches no dynamic code execution and no Node escape hatch — eval, Function, require(, import(, globalThis, process, fs: Planner -> eval is FORBIDDEN (§41-G) — matched ["eval"]
+Tests: 131 total, 129 passed, 2 failed
+kill2 exit: 1 (expect 1)
+RESTORE OK (e3df6696dd828f67ccd6dd39ccaa270ae1fae1f67a8d1b6596800846cf0cfb6e)
+== KILL 3 applied ==
+== KILL 3 run ==
+✗ G-4: Planner code calls no substrate mutation method — Store.write, Transaction.execute/commit/rollback, registry register/unregister, Renderer render/invalidate, SpatialIndex insert/remove/update/delete are structurally unreachable (§26: the only mutation path is Plan -> DSL -> Tool Registry -> Transaction -> Commit, executed by the substrate, never by the Planner): Planner -> substrate mutation call is FORBIDDEN (§26/§41-G) — matched [".write(",".execute(",".commit(",".insert(",".render("]
+Tests: 131 total, 130 passed, 1 failed
+kill3 exit: 1 (expect 1)
+RESTORE OK (e3df6696dd828f67ccd6dd39ccaa270ae1fae1f67a8d1b6596800846cf0cfb6e)
+== post-restore run ==
+
+Tests: 131 total, 131 passed, 0 failed
+post-restore exit: 0 (expect 0)
+STUBKILL PROOF: PASS

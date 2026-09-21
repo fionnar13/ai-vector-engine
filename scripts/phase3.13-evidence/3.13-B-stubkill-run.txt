@@ -1,0 +1,235 @@
+=== PHASE 3.13 Checkpoint A: PlanningErrorCodes (spec §14) ===
+✓ all 11 mandated planning error codes exist
+✓ PlanningError carries code + message and is an Error
+=== Checkpoint A: validateIntent — create (spec §05/§07) ===
+✓ spec §07 create-rectangle example is valid
+✓ missing type -> INVALID_INTENT; unknown type -> UNSUPPORTED_OPERATION
+✓ null / non-object intent -> INVALID_INTENT
+✓ missing objectType -> MISSING_PARAMETER
+✓ unknown objectType -> UNSUPPORTED_OBJECT_TYPE
+✓ missing width/height -> MISSING_PARAMETER
+✓ non-finite numeric values -> INVALID_PARAMETER (spec §07)
+✓ invalid dimensions (<=0) -> INVALID_PARAMETER
+✓ invalid color -> INVALID_PARAMETER
+✓ invalid opacity / placement -> INVALID_PARAMETER
+✓ create ellipse requires rx/ry; unknown keys rejected
+=== Checkpoint A: validateIntent — transform/appearance/alignment/structure (§07) ===
+✓ transform intent: valid translate; unknown operation -> UNSUPPORTED_OPERATION
+✓ appearance intent: fill and/or opacity; neither -> MISSING_PARAMETER
+✓ alignment intent: mode must be valid for axis (T08 rules, tools.js:399-402)
+✓ structure intent: group/ungroup only
+=== Checkpoint A: ExpectedState (spec §08/§09) ===
+✓ buildExpectedState: mechanical derivation for create rect (requested, not measured)
+✓ buildExpectedState: rx/ry default to 0 (symmetric true) when omitted
+✓ buildExpectedState: appearance / alignment / structure intents map their sections
+✓ validateExpectedState rejects missing sections / bad status / function values
+=== Checkpoint A: Plan / PlanStep (spec §10/§16) ===
+✓ makePlanStep + validatePlanStep
+✓ makePlan: §10 shape {id, intentId, steps, expectedState, deterministic, parentPlanId}
+✓ §16 determinism: identical intent + steps -> identical plan id + intentId
+✓ validatePlanStructure rejections: empty steps, deterministic=false, bad step, bad state
+=== Checkpoint A: PlanningContext (spec §13) ===
+✓ createPlanningContext: deep-frozen plain-data projection
+✓ createPlanningContext rejects function values (no mutation methods can be exposed, §13)
+✓ createPlanningContext rejects non-object input
+=== Checkpoint A: static determinism + security scan of src-js/ai.js (§05/§16/§26 precedent) ===
+✓ planner source is free of nondeterminism and forbidden capabilities
+=== Checkpoint B: fixtures (spec §20 vertical-slice intent) ===
+=== Checkpoint B: createExpectedState (spec §08/§15) ===
+✓ B: createExpectedState returns a deep-frozen, valid ExpectedState equal to buildExpectedState
+✓ B: createExpectedState throws PlanningError for an invalid intent (top-level INVALID_INTENT, specific code in details — buildExpectedState contract, ai.js:341)
+✓ B: createExpectedState rejects a mutable (non-frozen) context and a non-object context (§13)
+✓ B: createExpectedState works without a context (context optional at Checkpoint B)
+=== Checkpoint B: createPlan — Rules A/B/C/D on create intents (§12/§17/§20) ===
+✗ B: §20 slice plan = T01 geometry-only -> T07 fill -> T08 both/center (12/§20): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+PlanningError: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+    at createPlan (file:///home/z/my-project/ai-vector-engine/src-js/ai.js:674:9)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:272:14
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:271:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: Rule C — T01 receives NO fill key; rx AND ry both present (deviation 5): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+PlanningError: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+    at createPlan (file:///home/z/my-project/ai-vector-engine/src-js/ai.js:674:9)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:286:14
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:285:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: Rule B — center math per tool anchor: rect x/y top-left, ellipse cx/cy center: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+PlanningError: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+    at createPlan (file:///home/z/my-project/ai-vector-engine/src-js/ai.js:674:9)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:292:11
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:291:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: placement origin/absent — explicit x/y passthrough (tool anchor semantics), default 0,0: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+PlanningError: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+    at createPlan (file:///home/z/my-project/ai-vector-engine/src-js/ai.js:674:9)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:301:11
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:300:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: create + fill + opacity -> opacity rides the T07 step (tools.js:372): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+PlanningError: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+    at createPlan (file:///home/z/my-project/ai-vector-engine/src-js/ai.js:674:9)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:310:14
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:309:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: opacity-only create (no fill) -> NO_VALID_PLAN (T07 opacity-only needs an existing fill item, tools.js:377): refuses doomed plan
+Error: refuses doomed plan
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:316:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:315:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: placement center + explicit x/y -> INVALID_PARAMETER (conflict; Planner computes placement): x conflicts with center
+Error: x conflicts with center
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:319:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:318:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: placement center without artboard in context -> MISSING_PARAMETER: no artboard
+Error: no artboard
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:324:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:322:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: artboard with non-finite centerX/centerY -> INVALID_PARAMETER: NaN centerX
+Error: NaN centerX
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:328:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:326:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: non-create intent types -> UNSUPPORTED_OPERATION (planning rules arrive at Checkpoint C): transform
+Error: transform
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:333:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:332:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: invalid intent -> INVALID_INTENT; mutable context -> INVALID_PARAMETER; plan frozen + valid: invalid intent
+Error: invalid intent
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:337:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:336:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: non-finite x/y on a create intent (validator hole for absent placement) caught at plan time: x string
+Error: x string
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:17:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:347:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:346:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+=== Checkpoint B: validatePlan (spec §18) ===
+✗ B: valid slice plan passes with a frozen context; verdict object shape: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+PlanningError: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+    at createPlan (file:///home/z/my-project/ai-vector-engine/src-js/ai.js:674:9)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:352:14
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:351:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ B: PLANNER RULE — centered ExpectedState without a T08 step -> PLAN_INVALID (spec §20 mandate)
+✓ B: PLANNER RULE — T08 present but axis/mode not both/center -> PLAN_INVALID
+✓ B: dependency references — unknown $ref and forward $ref -> PLAN_INVALID
+✓ B: dependency convention — objectIds entries must use the $stepId form
+✓ B: duplicate step ids -> PLAN_INVALID
+✗ B: structural garbage + context contract (non-frozen context throws PlanningError): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+PlanningError: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+    at createPlan (file:///home/z/my-project/ai-vector-engine/src-js/ai.js:674:9)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:393:28
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:391:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+=== Checkpoint B: compilePlanToDSL (spec §23/§24) ===
+✗ B: slice plan -> DSL [create, appearance, align]; no fill inside the create args (Rule C): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+PlanningError: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+    at createPlan (file:///home/z/my-project/ai-vector-engine/src-js/ai.js:674:9)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:399:30
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:398:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: §24 round trip — Plan -> compilePlanToDSL -> parseDSL -> validateDSL -> compileToIR (same ops + deps): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+PlanningError: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+    at createPlan (file:///home/z/my-project/ai-vector-engine/src-js/ai.js:674:9)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:409:30
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:408:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: ellipse plan compiles to create/ellipse with cx/cy/rx/ry: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+PlanningError: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+    at createPlan (file:///home/z/my-project/ai-vector-engine/src-js/ai.js:674:9)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:425:30
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:424:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ B: compilePlanToDSL guards — unknown toolId, non-solid fill, empty T07, missing objectIds, invalid plan
+=== Checkpoint B: §16 determinism proof (mandatory) ===
+✓ B: same intent + same context, two runs -> ExpectedState JSON.stringify byte-identical
+✗ B: same intent + same context, two runs -> Plan JSON.stringify byte-identical (no Date.now/Math.random/randomUUID): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+PlanningError: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+    at createPlan (file:///home/z/my-project/ai-vector-engine/src-js/ai.js:674:9)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:453:11
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:452:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: same intent + same context, two runs -> compiled DSL JSON.stringify byte-identical: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+PlanningError: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+    at createPlan (file:///home/z/my-project/ai-vector-engine/src-js/ai.js:674:9)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:459:28
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:458:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B: key-order-permuted intent -> identical intentId/plan id (content-derived identity): STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+PlanningError: STUB-KILL: createPlan neutered for the Checkpoint B stub-kill proof (spec §28/§29)
+    at createPlan (file:///home/z/my-project/ai-vector-engine/src-js/ai.js:674:9)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:465:12
+    at test (file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:16:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/ai.test.mjs:463:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Tests: 60 total, 40 passed, 20 failed
