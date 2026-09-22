@@ -1,0 +1,26 @@
+# PHASE 3.14 Checkpoint C — STUB-KILL SUMMARY
+
+Pristine: scripts/phase3.14-evidence/critic.js.checkpointC.pristine
+sha256(098487e6dd7ff5dfb9d578a09166e4e90b2cd41298c8da3b03dd4a31710f99e0)
+
+## KILL 1 — rule engine: appearance rule neutered
+Patch: appearanceProposal first line `if (d.property !== '__never__') return null;`
+Predicted: C-6, C-7, C-8, C-9, C-18, C-19 (6 failures)
+Observed: C-6, C-7, C-8, C-9, C-18, C-19 — EXACT MATCH (6 failed / 88, exit 1)
+Notes: C-20 (determinism) stays green under the kill — both runs produce the
+same (reduced) output; determinism is orthogonal to rule coverage, which is
+exactly what KILL 1's set demonstrates.
+Evidence: 3.14-C-stubkill-run1.txt
+
+## KILL 2 — proposal-validation gate: targetRef grammar check neutered
+Patch: proposalFieldErrors `if (!isPlanRefOrNull(p.targetRef))` -> `if (false && ...)`
+Predicted: C-23 only (1 failure)
+Observed: C-23 — EXACT MATCH (1 failed / 88, exit 1)
+Notes: C-24's targetRef case deletes the KEY (key-presence check, a different
+gate) and therefore still fails validation as predicted — the two gates are
+independent.
+Evidence: 3.14-C-stubkill-run2.txt
+
+## RESTORE
+sha256 after restore = pristine hash (verified above).
+Post-restore: 88/88 exit 0 — 3.14-C-post-restore-green.txt

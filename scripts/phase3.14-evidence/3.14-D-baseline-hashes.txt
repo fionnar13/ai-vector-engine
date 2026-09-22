@@ -1,0 +1,4 @@
+098487e6dd7ff5dfb9d578a09166e4e90b2cd41298c8da3b03dd4a31710f99e0  src-js/critic.js
+a719a433f7980950b239743253c1d4912a4d0dfe0418b95194e9346224bacf5c  src-js/evaluation.js
+9fdcb4c9a270eb55a4d142c3fc038be320be8ec0c3a27e67691702364cc29f94  tests/evaluation-critic.test.mjs
+66048cffb63cbbda64b97b7f18436d3bf38ffbc9ddc3fb6e113944c2364805ef  scripts/run-suite.sh

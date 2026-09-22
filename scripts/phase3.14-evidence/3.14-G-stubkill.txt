@@ -1,0 +1,32 @@
+=== PHASE 3.14 Checkpoint G stub-kill battery 2026-09-22T02:10:55Z ===
+--- KILL-1: evaluation.js += import fs from 'node:fs' (static import form) ---
+  Tests: 120 total, 115 passed, 5 failed
+KILL-1: rc=1
+  predicted: A-29 B-30 G-1 G-2 G-8 
+  observed : A-29 B-30 G-1 G-2 G-8 
+  verdict  : EXACT-MATCH
+  restore: sha256 OK (a719a433f7980950b239743253c1d4912a4d0dfe0418b95194e9346224bacf5c)
+--- KILL-2: critic.js += alias-form eval/Function references + no-op mutation-method calls (never invoked) ---
+  Tests: 120 total, 116 passed, 4 failed
+KILL-2: rc=1
+  predicted: C-3 F-3 G-5 G-6 
+  observed : C-3 F-3 G-5 G-6 
+  verdict  : EXACT-MATCH
+  restore: sha256 OK (0ab9f7f03aa2db8383d569fc3c897264a4679f1d7e8fca369b05ba3a54fac722)
+--- KILL-3: evaluation.js += no-op mutation-method calls write/set/delete (never invoked) ---
+  Tests: 120 total, 118 passed, 2 failed
+KILL-3: rc=1
+  predicted: A-31 G-3 
+  observed : A-31 G-3 
+  verdict  : EXACT-MATCH
+  restore: sha256 OK (a719a433f7980950b239743253c1d4912a4d0dfe0418b95194e9346224bacf5c)
+--- KILL-4: package.json += dependencies field (file-level run; ai.test.mjs G-5 would also flip at suite level — documented) ---
+  Tests: 120 total, 119 passed, 1 failed
+KILL-4: rc=1
+  predicted: G-8 
+  observed : G-8 
+  verdict  : EXACT-MATCH
+  restore: sha256 OK (b329cc0d410cef4fe81fa75deec5f2ad7655974c2ecdda13c1f669a12e8da965)
+--- post-restore green run ---
+  Tests: 120 total, 120 passed, 0 failed (rc=0)
+STUBKILL PROOF: PASS (4 kills, exact predicted sets, sha256-verified restores)

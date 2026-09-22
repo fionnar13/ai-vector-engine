@@ -1,0 +1,9 @@
+{
+  "name": "ai-native-vector-graphics-engine",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "bash scripts/run-suite.sh",
+    "typecheck": "npx -y -p typescript tsc --noEmit"
+  }
+}

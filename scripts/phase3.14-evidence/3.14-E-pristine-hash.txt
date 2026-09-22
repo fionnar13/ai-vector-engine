@@ -1,0 +1,8 @@
+PHASE 3.14 — CHECKPOINT E — PRISTINE SNAPSHOT (post-GREEN discipline)
+Date: 2026-09-22T00:39:04Z
+Discipline (mandated at Checkpoint D acceptance): 'Pristine snapshot MUST be taken AFTER
+  GREEN verification, not before. Capture from the verified post-GREEN state.'
+Captured from: the verified post-GREEN state (105/105 file + 784/784 counted suite + 5/5 gates, exit 0).
+Pristine file: scripts/phase3.14-evidence/critic.js.checkpointE.pristine
+0ab9f7f03aa2db8383d569fc3c897264a4679f1d7e8fca369b05ba3a54fac722  src-js/critic.js
+0ab9f7f03aa2db8383d569fc3c897264a4679f1d7e8fca369b05ba3a54fac722  scripts/phase3.14-evidence/critic.js.checkpointE.pristine
