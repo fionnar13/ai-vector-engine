@@ -1,0 +1,15 @@
+=== 3.14-G probe provenance ===
+date: 2026-09-22T02:03:16Z
+src/core git status at manifest generation:
+0
+(0 entries = clean; manifest generated from the git-clean tree)
+
+(1) stripper: 1:1 on both modules, code preserved, comments/strings stripped (raw \btool\b in critic.js: 2, stripped: 0)
+(2) clean modules: ZERO matches for all capability words, call forms, mutation surface, tool surface (both modules)
+(3) positive controls: ALL FIRE (mutation-method control calls: 14); alias-form contrast proven (paren scans blind, word scans see)
+(4) import contracts: evaluation.js ["./geometry.js","./bbox.js"], critic.js ["./evaluation.js"]
+(5) src/core manifest: 178 files, aggregate sha256 = 137327739471ff095325854c296a82aa84afde0258b396ad6902b22de3e21e56
+    top-level entries: ["README.md","appearance","constraints","dsl","errors","events","geometry","ids","interaction","math","renderer","scenegraph","semantic","stores","tools","transaction","validation"]
+(6) package.json: no dependencies/devDependencies/optionalDependencies/peerDependencies fields
+
+PROBE PASS — patterns safe to embed in tests/evaluation-critic.test.mjs

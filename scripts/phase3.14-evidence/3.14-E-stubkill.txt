@@ -1,0 +1,24 @@
+PHASE 3.14 — CHECKPOINT E — STUB-KILL SUMMARY
+Date: 2026-09-22T00:40:15Z
+Target: src-js/critic.js evaluateAndCritique (the §57/§58 orchestrator both slice eras consume).
+Pristine: critic.js.checkpointE.pristine, sha256 0ab9f7f03aa2db8383d569fc3c897264a4679f1d7e8fca369b05ba3a54fac722
+captured AFTER GREEN verification per the Checkpoint D acceptance discipline.
+
+KILL 1 — critic stage neutered (line 444: proposeCorrections(evaluationResult) -> deepFreeze([])).
+  Rationale: proves the E slice tests bite when the Critic handoff dies.
+  Predicted failures (8): D-2, D-4, D-5, D-9, E-S2, E-S3, E-S4, E-S5.
+    D-1/D-10 stay green (they expect ZERO proposals); D-3 stays green (its proposal-side
+    asserts are vacuously true on an empty array — deviation-side asserts still bite);
+    E-S1 green (zero proposals expected); E-S6/E-S7 green (loop/determinism orthogonal to rule coverage).
+  Observed (3.14-E-stubkill-run1.txt): D-2, D-4, D-5, D-9, E-S2, E-S3, E-S4, E-S5 — EXACT MATCH (105 total, 97 passed, 8 failed, exit 1).
+
+KILL 2 — evaluation stage mis-provisioned (line 443: artboard withheld from the evaluation context).
+  Rationale: the §58 context-provisioning contract — the artboard the Planner used MUST also reach
+  Evaluation; evaluate() must refuse to guess it (MISSING_PARAMETER), and the slices must catch it.
+  Predicted failures (17): D-1..D-10 (every D-era integration test calls evaluateAndCritique with
+    spatial.centered===true) + E-S1..E-S7 (every slice goes through the harness).
+  Observed (3.14-E-stubkill-run2.txt): D-1..D-10, E-S1..E-S7 — EXACT MATCH (105 total, 88 passed, 17 failed, exit 1);
+    every failure message carries the honest MISSING_PARAMETER refusal (evaluation.js artboardErrors).
+
+Restores: sha256-verified both times (0ab9f7f0... == pristine); post-restore 105/105 exit 0
+(3.14-E-post-restore-green.txt).

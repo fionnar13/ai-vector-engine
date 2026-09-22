@@ -1,0 +1,5 @@
+=== 3.14 CHECKPOINT A STUB-KILL SUMMARY ===
+pristine sha256: db8451b2a50553a2488b4f4896dcb2e03ba8134f363165f3f4ec0fc176a12294
+KILL 1 (createEvaluationResult status derivation -> constant 'DEVIATION'): 33 total, 2 FAILED (A-22, A-26), exit 1 — exactly the predicted set; restore sha256-verified
+KILL 2 (deviationFieldErrors targetRef contract -> if(false)): 33 total, 1 FAILED (A-19), exit 1 — exactly the predicted set; restore sha256-verified
+post-restore: 33/33 exit 0, hash == pristine

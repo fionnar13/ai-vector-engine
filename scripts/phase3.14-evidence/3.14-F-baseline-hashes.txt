@@ -1,0 +1,7 @@
+0ab9f7f03aa2db83  src-js/critic.js
+a719a433f7980950  src-js/evaluation.js
+e3df6696dd828f67  src-js/ai.js
+0dc8124f83fa026d  src-js/tools.js
+e35b3132d4c274ce  src-js/dsl.js
+66048cffb63cbbda  scripts/run-suite.sh
+419f319669c36632  tests/evaluation-critic.test.mjs

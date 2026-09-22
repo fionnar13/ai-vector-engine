@@ -1,0 +1,51 @@
+=== PHASE 3.14 Checkpoint A: error model (spec §54; house style) ===
+✓ A-1: evaluation error codes exist and EvaluationError behaves like PlanningError
+✓ A-2: deviation category + severity vocabularies are exactly the §13 enums
+=== PHASE 3.14 Checkpoint A: ActualState construction (spec §10/§11) ===
+✓ A-3: existing rect object is observed read-only with geometry, fill, placement, structure
+✓ A-4: missing object is observed as exists:false with null observation fields (§21 substrate)
+✓ A-5: WorldBBox = geometryBBox ⊕ BBox.transform(local, worldTransform) via public pure pieces (§17/§51)
+✓ A-6: ellipse geometry observed with center-anchor params (T02 contract)
+✓ A-7: unsupported geometry type is observed verbatim with worldBBox null — no invented measurement
+✓ A-8: appearance stack without a fill item observes fill:null (§16 substrate honesty)
+✓ A-9: buildActualState is deterministic — identical stores yield byte-identical snapshots (§22)
+✓ A-10: buildActualState does not mutate the canonical stores (§42 Layer 1; gate 25 substrate)
+✓ A-11: ActualState is an immutable snapshot — deep-frozen root, entries, and nested values (§10/§42 Layer 2)
+✓ A-12: buildActualState rejects a non-conforming document context (duck-typed read surface)
+✓ A-13: buildActualState rejects invalid evaluation contexts (§13 reference grammar, deterministic ambiguity refusal)
+=== PHASE 3.14 Checkpoint A: validateActualState ===
+✓ A-14: snapshots validate; corrupted variants fail with INVALID_ACTUAL_STATE
+✓ A-15: validateActualState rejects non-object input and empty-object entries
+=== PHASE 3.14 Checkpoint A: Deviation (spec §13) ===
+✓ A-16: createDeviation returns a frozen structured record with a content-derived id (§13/§12)
+✓ A-17: deviation id is content-derived — identical content yields identical id, content change moves the id (§22, gate 8)
+✓ A-18: absent optional deviation fields normalize to null; all 11 keys stay present
+✗ A-19: createDeviation enforces the §13 content contract (deterministic refusals): targetRef null or '$'-prefixed: nothing was thrown
+Error: targetRef null or '$'-prefixed: nothing was thrown
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:37:38)
+    at throwsWithCode (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:42:3)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:331:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:36:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:322:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ A-20: validateDeviation — valid records pass; every missing §13 key fails; targetRef key is mandatory (gate 7)
+✓ A-21: both §13 reference kinds are accepted in targetRef ($doc: and $stepId)
+=== PHASE 3.14 Checkpoint A: EvaluationResult (spec §12) ===
+✓ A-22: PASS result — zero deviations => status PASS exactly (gate 5)
+✓ A-23: DEVIATION result — one deviation => status DEVIATION exactly (gate 5, other direction)
+✓ A-24: metadata is optional, defaults to a frozen empty object, and carries caller content verbatim (deterministic only)
+✓ A-25: createEvaluationResult rejects invalid inputs with the §54 error model
+✓ A-26: validateEvaluationResult enforces the status/length equivalence in BOTH directions (gate 5 enforcement)
+=== PHASE 3.14 Checkpoint A: determinism (§22, gates 10/13/14) ===
+✓ A-27: repeated evaluation-model runs over identical state produce identical JSON — and no wall-clock entropy exists
+✓ A-28: the model layer contains no entropy sources — Date.now / random-UUID tokens absent from evaluation.js (gates 9/10)
+=== PHASE 3.14 Checkpoint A: A-era source guard (3.13 precedent ai.test.mjs:225; full G-pattern suite = Checkpoint G, spec §60) ===
+✓ A-29: import contract — evaluation.js imports exactly the two public pure-piece modules, all specifiers relative
+✓ A-30: forbidden capability surfaces are absent from evaluation.js source (raw-scan A-era)
+✓ A-31: no mutation-surface calls in evaluation.js — stores are read via get/has/list only (§52, gates 25-27 substrate)
+✓ A-32: gate 3 — the measured-status escape hatch is not used: the token never appears in evaluation.js (§07/§62)
+✓ A-33: the evaluation module does not import the Planner or any store class — document context is injected (§06/§10/§11)
+
+Tests: 33 total, 32 passed, 1 failed

@@ -1,0 +1,170 @@
+=== PHASE 3.14 Checkpoint A: error model (spec §54; house style) ===
+✓ A-1: evaluation error codes exist and EvaluationError behaves like PlanningError
+✓ A-2: deviation category + severity vocabularies are exactly the §13 enums
+=== PHASE 3.14 Checkpoint A: ActualState construction (spec §10/§11) ===
+✓ A-3: existing rect object is observed read-only with geometry, fill, placement, structure
+✓ A-4: missing object is observed as exists:false with null observation fields (§21 substrate)
+✓ A-5: WorldBBox = geometryBBox ⊕ BBox.transform(local, worldTransform) via public pure pieces (§17/§51)
+✓ A-6: ellipse geometry observed with center-anchor params (T02 contract)
+✓ A-7: unsupported geometry type is observed verbatim with worldBBox null — no invented measurement
+✓ A-8: appearance stack without a fill item observes fill:null (§16 substrate honesty)
+✓ A-9: buildActualState is deterministic — identical stores yield byte-identical snapshots (§22)
+✓ A-10: buildActualState does not mutate the canonical stores (§42 Layer 1; gate 25 substrate)
+✓ A-11: ActualState is an immutable snapshot — deep-frozen root, entries, and nested values (§10/§42 Layer 2)
+✓ A-12: buildActualState rejects a non-conforming document context (duck-typed read surface)
+✓ A-13: buildActualState rejects invalid evaluation contexts (§13 reference grammar, deterministic ambiguity refusal)
+=== PHASE 3.14 Checkpoint A: validateActualState ===
+✓ A-14: snapshots validate; corrupted variants fail with INVALID_ACTUAL_STATE
+✓ A-15: validateActualState rejects non-object input and empty-object entries
+=== PHASE 3.14 Checkpoint A: Deviation (spec §13) ===
+✓ A-16: createDeviation returns a frozen structured record with a content-derived id (§13/§12)
+✓ A-17: deviation id is content-derived — identical content yields identical id, content change moves the id (§22, gate 8)
+✓ A-18: absent optional deviation fields normalize to null; all 11 keys stay present
+✓ A-19: createDeviation enforces the §13 content contract (deterministic refusals)
+✓ A-20: validateDeviation — valid records pass; every missing §13 key fails; targetRef key is mandatory (gate 7)
+✓ A-21: both §13 reference kinds are accepted in targetRef ($doc: and $stepId)
+=== PHASE 3.14 Checkpoint A: EvaluationResult (spec §12) ===
+✓ A-22: PASS result — zero deviations => status PASS exactly (gate 5)
+✓ A-23: DEVIATION result — one deviation => status DEVIATION exactly (gate 5, other direction)
+✓ A-24: metadata is optional, defaults to a frozen empty object, and carries caller content verbatim (deterministic only)
+✓ A-25: createEvaluationResult rejects invalid inputs with the §54 error model
+✓ A-26: validateEvaluationResult enforces the status/length equivalence in BOTH directions (gate 5 enforcement)
+=== PHASE 3.14 Checkpoint A: determinism (§22, gates 10/13/14) ===
+✓ A-27: repeated evaluation-model runs over identical state produce identical JSON — and no wall-clock entropy exists
+✓ A-28: the model layer contains no entropy sources — Date.now / random-UUID tokens absent from evaluation.js (gates 9/10)
+=== PHASE 3.14 Checkpoint A: A-era source guard (3.13 precedent ai.test.mjs:225; full G-pattern suite = Checkpoint G, spec §60) ===
+✓ A-29: import contract — evaluation.js imports exactly the two public pure-piece modules, all specifiers relative
+✓ A-30: forbidden capability surfaces are absent from evaluation.js source (raw-scan A-era)
+✓ A-31: no mutation-surface calls in evaluation.js — stores are read via get/has/list only (§52, gates 25-27 substrate)
+✓ A-32: gate 3 — the measured-status escape hatch is not used: the token never appears in evaluation.js (§07/§62)
+✓ A-33: the evaluation module does not import the Planner or any store class — document context is injected (§06/§10/§11)
+=== PHASE 3.14 Checkpoint B: entry contract (spec §12/§55) ===
+✓ B-1: vertical slice PASS — perfect execution yields status PASS, zero deviations, no false deviations (§37)
+✓ B-2: evaluate refuses malformed expected input — shape, desired-status marker, transform section contract
+✓ B-3: centered expectation without an artboard is MISSING_PARAMETER — the artboard is never guessed (§17); bbox-only expectations need no artboard
+✓ B-4: evaluate propagates the injected-context contracts (doc read surface + evaluation context)
+=== PHASE 3.14 Checkpoint B: E1 existence (spec §21) ===
+✓ B-5: missing object produces exactly one existence deviation with the target binding; deeper checks short-circuit (§21)
+✓ B-6: deviation order is target-major — the existing target’s deviations precede the missing target’s existence deviation
+=== PHASE 3.14 Checkpoint B: E2 geometry (spec §15, tolerance §14) ===
+✓ B-7: ellipse geometry evaluates through the builder’s own formulas (rx/ry/area=PI*rx*ry/symmetric)
+✓ B-8: width deviation carries expected/actual/delta(actual-expected)/tolerance; derived area follows (§38 shapes)
+✓ B-9: tolerance boundary — within 1e-9 no deviation, beyond it a deviation (§14/§15: abs(actual-expected) <= tolerance)
+✓ B-10: ry and derived symmetric deviations fire in fixed property order
+✓ B-11: observed counterpart missing (params without rx/ry) reports actual:null with tolerance:null — never invented
+=== PHASE 3.14 Checkpoint B: E3 appearance (spec §16/§50) ===
+✓ B-12: hex normalization — #FF0000, #f00 and #ff0000 all match the canonical substrate RGBA (no representation mismatch)
+✓ B-13: fill color deviation compares in canonical RGBA space on BOTH sides (§39)
+✓ B-14: expected fill with no observed fill item is a deviation (expected hex, actual null)
+✓ B-15: non-solid observed fill kind is a deviation (hex expectation corresponds to solid, §16)
+✓ B-16: an inert (disabled) fill does not satisfy the fill expectation — one fill.enabled deviation, no color noise
+✓ B-17: opacity compares against the observed fill item opacity with the appearance tolerance
+✓ B-18: stroke expectation is self-reported as unevaluated, never silently dropped and never invented into a deviation (§16 MVP)
+=== PHASE 3.14 Checkpoint B: E4 placement (spec §17) ===
+✓ B-19: centered placement — matching center passes; drifted center yields one center deviation vs the artboard center
+✓ B-20: centered expectation with an unmeasurable geometry (worldBBox null) reports actual:null — honest, not invented
+✓ B-21: bbox expectation — four-edge comparison with per-edge deltas; artboard not required for bbox-only placement
+=== PHASE 3.14 Checkpoint B: E5 structure (spec §18) ===
+✓ B-22: grouped expectation compares both directions against the observed parent-is-group fact
+=== PHASE 3.14 Checkpoint B: E6 semantic (spec §20) ===
+✓ B-23: a semantic expectation section is self-reported unevaluated — no semantic deviation is ever invented (§20)
+=== PHASE 3.14 Checkpoint B: E7 transform (spec §19) ===
+✓ B-24: null/absent transform expectations generate NO transform deviations (§19); malformed transform contracts are refused
+✓ B-25: non-null transform expectations compare per-key against the observed world transform
+=== PHASE 3.14 Checkpoint B: determinism, ordering, purity, contract (spec §22, §42) ===
+✓ B-26: repeated evaluation over identical state is byte-identical (§22/§67)
+✓ B-27: declared deviation order — target-major, category rank (existence..transform), fixed property order (gate 11)
+✓ B-28: evaluate does not mutate canonical stores or hierarchy (§42 Layer 1; gate 25)
+✓ B-29: tolerance contract — EVALUATION_TOLERANCES exported, frozen, uniform 1e-9 (geometry kernel discipline, §14)
+✓ B-30: source scan — fill normalization is local (no dsl import, no substrate-parser identifier), import contract unchanged (§50)
+=== PHASE 3.14 Checkpoint C: entry contract (spec §23/§25/§56) ===
+✓ C-1: proposeCorrections on a PASS EvaluationResult yields an empty frozen proposal array (§23)
+✓ C-2: proposeCorrections refuses non-EvaluationResult input (consumes the §12 contract, not a shape guess)
+✓ C-3: source scan — critic.js imports exactly the evaluation contract, is read-only, and carries no entropy (§24/§29, gates 21/25-27 substrate)
+=== PHASE 3.14 Checkpoint C: rule engine — supported corrections (spec §27) ===
+✗ C-4: geometry deviation -> ONE create-rebuild proposal from the desired-state projection; derived area deviation dedupes into it (§27): proposal names the deviation that caused it: "dev-deadbeef" !== "dev-d3429397"
+Error: proposal names the deviation that caused it: "dev-deadbeef" !== "dev-d3429397"
+    at eq (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:79:39)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:933:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:77:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:926:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ C-5: ellipse geometry deviation rebuilds the ellipse create projection (rx/ry, no width/height)
+✗ C-6: fill.color deviation -> appearance proposal restoring the requested hex via T07 capability (§16/§27): eq failed: "dev-deadbeef" !== "dev-5ed85c33"
+Error: eq failed: "dev-deadbeef" !== "dev-5ed85c33"
+    at eq (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:79:39)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:963:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:77:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:957:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ C-7: fill.kind deviation -> the same appearance-fill correction (restoration value comes from the ExpectedState, not the deviation)
+✓ C-8: missing fill deviation -> appearance-fill proposal (the T07 capability covers the absent-fill case)
+✓ C-9: opacity deviation -> appearance proposal carrying the requested opacity (T07 opacity-only, tools.js:375-378)
+✓ C-10: placement center deviation -> translate proposal with delta = expected center - observed center (T05 delta semantics, ai.js:777-779)
+✓ C-11: transform tx deviation -> translate proposal ONLY when the ExpectedState carries the non-null expectation (user directive)
+=== PHASE 3.14 Checkpoint C: rule engine — unsupported corrections produce NO proposal (spec §28, never bypass) ===
+✓ C-12: existence deviations propose nothing — the ExpectedState carries no creation binding (§28)
+✓ C-13: structure deviations propose nothing in MVP — grouped:true needs >=2 targets (T10, ai.js:840-845); grouped:false targets a group NODE id the object-targeted intent grammar cannot carry (T11, ai.js:834/tools.js:517-525)
+✓ C-14: semantic deviations propose nothing in MVP (no tool supports semantic mutation, §27)
+✓ C-15: transform deviations for matrix keys (a/b/c/d) propose nothing — no safe capability maps node-matrix components (§28)
+✓ C-16: the transform rule is dormant when the ExpectedState carries no transform expectations — no proposal despite a transform-shaped deviation
+✓ C-17: placement bbox-edge deviations propose nothing — the moving corner is ambiguous (§28); transform deviations with unobservable actual propose nothing
+=== PHASE 3.14 Checkpoint C: dedup + ordering + determinism (spec §29/§30) ===
+✗ C-18: deduplication — identical corrections for the same target collapse to the first deviation (§28-safe): the first deviation owns the proposal: "dev-deadbeef" !== "dev-332fca81"
+Error: the first deviation owns the proposal: "dev-deadbeef" !== "dev-332fca81"
+    at eq (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:79:39)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:1067:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:77:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:1061:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ C-19: proposal ordering follows the deviation order; priority = deviation index (§30: deviation order is the primary basis): eq failed: "dev-deadbeef" !== "dev-d3429397"
+Error: eq failed: "dev-deadbeef" !== "dev-d3429397"
+    at eq (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:79:39)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:1080:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:77:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:1074:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ C-20: repeated critique over identical state is byte-identical (§29/§67)
+✓ C-21: the Critic does not mutate canonical stores (§24; gate 21)
+=== PHASE 3.14 Checkpoint C: CorrectionProposal validation (spec §25/§28) ===
+✓ C-22: createCorrectionProposal builds a frozen 7-field record with a content-derived id; the intent vocabulary mirrors the planning capabilities
+✓ C-23: createCorrectionProposal enforces the §25/§28 content contract (deterministic refusals)
+✓ C-24: validateCorrectionProposal — every missing §25 key invalidates; round-trips validate
+✓ C-25: proposal ids are content-derived — identical content yields identical ids, any content change moves the id (§29, gate 9)
+=== PHASE 3.14 Checkpoint D: Evaluation + Critic integration (spec §42/§57) ===
+✓ D-1: evaluateAndCritique is the single §57 entry — returns the frozen { evaluationResult, proposals } pair; PASS end-to-end
+✗ D-2: DEVIATION end-to-end — every proposal references a deviation OF THE SAME result and carries its targetRef exactly: proposal prop-86de6164 references a deviation that exists in the SAME evaluationResult
+Error: proposal prop-86de6164 references a deviation that exists in the SAME evaluationResult
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:78:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:1179:5
+    at test (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:77:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:1172:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ D-3: targetRef flow — every deviation.targetRef is SET (never undefined, §13 grammar) and flows onto its proposal unaltered: no proposal without a deviation (§25: the proposal must identify its deviation)
+Error: no proposal without a deviation (§25: the proposal must identify its deviation)
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:78:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:1192:5
+    at test (file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:77:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/evaluation-critic.test.mjs:1183:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ D-4: plan-level deviations (targetRef:null) -> plan-level proposals carrying null, or no proposal per rule (§13/§21/§28)
+✓ D-5: determinism of the composed output — repeated runs byte-identical (sha256-equal) and orchestrator === manual two-step composition (§29/§67)
+✓ D-6: §42 Layer 1 on the integrated path — the full pipeline (evaluation + critique) leaves stores, hierarchy, and the ExpectedState input untouched
+✓ D-7: §42 Layer 2 — the ActualState embedded in the integrated output is a deep-frozen immutable snapshot
+✓ D-8: §42 Layer 3 — critique mutates neither the canonical stores nor the EvaluationResult it consumes
+✓ D-9: §42 Layer 4 — CorrectionProposal is not execution authority: inert frozen plain data, planning vocabulary only
+✓ D-10: honest empty-proposal integration — a missing target yields DEVIATION + existence deviation + zero proposals, end to end (§21/§28)
+
+Tests: 98 total, 92 passed, 6 failed

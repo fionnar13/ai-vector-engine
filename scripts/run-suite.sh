@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 
 TOTAL=0; PASSED=0; FAILED=0; RC=0
 
-FILES="tests/ai.test.mjs tests/appearance-graph.test.mjs tests/appearance.test.mjs tests/constraints.test.mjs tests/dsl.test.mjs tests/geometry.test.mjs tests/interaction-boundaries.test.mjs tests/interaction.test.mjs tests/renderer.test.mjs tests/scenegraph.test.mjs tests/semantic.test.mjs tests/spatial-index.test.mjs tests/stores.test.mjs tests/tools.test.mjs tests/transaction.test.mjs"
+FILES="tests/ai.test.mjs tests/appearance-graph.test.mjs tests/appearance.test.mjs tests/constraints.test.mjs tests/dsl.test.mjs tests/evaluation-critic.test.mjs tests/geometry.test.mjs tests/interaction-boundaries.test.mjs tests/interaction.test.mjs tests/renderer.test.mjs tests/scenegraph.test.mjs tests/semantic.test.mjs tests/spatial-index.test.mjs tests/stores.test.mjs tests/tools.test.mjs tests/transaction.test.mjs"
 
 for f in $FILES; do
   raw=$(node "$f" 2>&1)

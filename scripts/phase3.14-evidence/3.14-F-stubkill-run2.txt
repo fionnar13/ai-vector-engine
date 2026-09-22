@@ -1,0 +1,27 @@
+
+> ai-native-vector-graphics-engine@0.1.0 test
+> bash scripts/run-suite.sh
+
+tests/ai.test.mjs                          Tests: 131 total, 131 passed, 0 failed [OK]
+tests/appearance-graph.test.mjs            Tests: 22 total, 22 passed, 0 failed [OK]
+tests/appearance.test.mjs                  Tests: 36 total, 36 passed, 0 failed [OK]
+tests/constraints.test.mjs                 Tests: 40 total, 40 passed, 0 failed [OK]
+tests/dsl.test.mjs                         Tests: 55 total, 55 passed, 0 failed [OK]
+tests/evaluation-critic.test.mjs           Tests: 111 total, 88 passed, 23 failed [FAIL]
+tests/geometry.test.mjs                    Tests: 37 total, 37 passed, 0 failed [OK]
+tests/interaction-boundaries.test.mjs      Tests: 13 total, 13 passed, 0 failed [OK]
+tests/interaction.test.mjs                 Tests: 55 total, 55 passed, 0 failed [OK]
+tests/renderer.test.mjs                    Tests: 52 total, 52 passed, 0 failed [OK]
+tests/scenegraph.test.mjs                  Tests: 41 total, 41 passed, 0 failed [OK]
+tests/semantic.test.mjs                    Tests: 49 total, 49 passed, 0 failed [OK]
+tests/spatial-index.test.mjs               Tests: 13 total, 13 passed, 0 failed [OK]
+tests/stores.test.mjs                      Tests: 19 total, 19 passed, 0 failed [OK]
+tests/tools.test.mjs                       Tests: 84 total, 84 passed, 0 failed [OK]
+tests/transaction.test.mjs                 Tests: 32 total, 32 passed, 0 failed [OK]
+COUNTED SUITE: 767 passed / 23 failed (of 790)
+--- standalone gates ---
+gate PASS: tests/geometry.test.js
+gate PASS: tests/architecture.test.mjs
+gate PASS: tests/architecture-phase3.04.mjs
+gate PASS: tests/run-js.js
+gate PASS: src-js/run.js (dsl vertical slice)

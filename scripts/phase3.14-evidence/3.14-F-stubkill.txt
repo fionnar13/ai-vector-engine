@@ -1,0 +1,40 @@
+PHASE 3.14 — CHECKPOINT F stub-kill summary (dual kill, both on critic.js evaluateAndCritique — the §57/§59 orchestrator)
+
+PRISTINE: captured AFTER GREEN verification per the mandated discipline
+  critic.js.checkpointF.pristine sha256 0ab9f7f03aa2db83... (identical to the
+  Checkpoint C/D/E-era hash — F touched no production file).
+
+KILL 1 — the orchestrator's critic stage neutered (critic.js:444):
+  `const proposals = proposeCorrections(evaluationResult);`
+  -> `const proposals = deepFreeze([]); // [STUB-KILL-F-1]`
+  The exported proposeCorrections stays intact (C-era tests unaffected); the
+  kill severs proposals from the composed §57 pair.
+  PREDICTED (14): D-2, D-4, D-5, D-9, E-S2, E-S3, E-S4, E-S5,
+                  F-1, F-2, F-3, F-4, F-5, F-6
+  OBSERVED  (14): D-2 D-4 D-5 D-9 E-S2 E-S3 E-S4 E-S5 F-1 F-2 F-3 F-4 F-5 F-6
+                  (3.14-F-stubkill-file1.txt) — EXACT match.
+  Survivors (97): A/B/C-era 88 + D-1 (PASS fixture expects zero proposals),
+  D-3 (proposal-side asserts vacuous on an empty array), D-6/D-7/D-8
+  (proposal-independent immutability proofs), D-10 (expects zero proposals),
+  E-S1 (zero proposals), E-S6/E-S7 (byte-identity holds on the emptied
+  proposal sets; digests remain pairwise distinct) — all as predicted.
+  npm counted suite: 776 passed / 14 failed (of 790) (3.14-F-stubkill-run1.txt).
+
+KILL 2 — artboard withheld from the evaluation stage (critic.js:443):
+  `evaluate(expectedState, documentContext, evaluationContext);`
+  -> `evaluate(expectedState, documentContext, { ...evaluationContext, artboard: undefined }); // [STUB-KILL-F-2]`
+  The §58 context-provisioning contract severed: every evaluate() call through
+  the orchestrator throws the honest MISSING_PARAMETER refusal ("the artboard
+  is never guessed", evaluation.js:989); every memoized slice run rejects.
+  PREDICTED (23): D-1..D-10, E-S1..E-S7, F-1..F-6
+  OBSERVED  (23): D-1 D-2 D-3 D-4 D-5 D-6 D-7 D-8 D-9 D-10 E-S1 E-S2 E-S3 E-S4
+                  E-S5 E-S6 E-S7 F-1 F-2 F-3 F-4 F-5 F-6
+                  (3.14-F-stubkill-file2.txt) — EXACT match.
+  Survivors (88): A/B/C-era only (direct evaluate/proposeCorrections callers
+  are untouched by the orchestrator kill).
+  npm counted suite: 767 passed / 23 failed (of 790) (3.14-F-stubkill-run2.txt).
+
+RESTORES: sha256-verified both times (0ab9f7f0... == pristine);
+post-restore file run 111/111 exit 0 (3.14-F-post-kill1-green.txt,
+3.14-F-post-restore-green.txt); FINAL full npm test 790/790, 5/5 gates, exit 0
+(3.14-F-npm-test-final.txt); typecheck exit 0 (3.14-F-typecheck.txt).

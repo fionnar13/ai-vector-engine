@@ -1,0 +1,594 @@
+// ============================================================================
+// src-js/evaluation.js — EVALUATION DATA MODEL (PHASE 3.14, Checkpoint A)
+// ============================================================================
+// Spec scope: §10-§14 (ActualState / construction / EvaluationResult /
+// Deviation / tolerance fields), §22 (determinism), §54 (Checkpoint A),
+// §62 gates 1-7.
+//
+// ARCHITECTURE BOUNDARY (spec §02/§10/§42/§52):
+//   - This module is READ-ONLY by construction. It never mutates canonical
+//     stores, the hierarchy, transactions, history, or events. All store
+//     access is injected via the doc-context argument (duck-typed read
+//     surface: get/listIds + hierarchy reads) — nothing is imported from
+//     the persistence layer.
+//   - WorldBBox is composed from PUBLIC PURE PIECES only (spec §51):
+//     geometry.js bbox functions ⊕ bbox.js transform ⊕ the hierarchy's
+//     world-transform read. The substrate-private helper in tools.js stays
+//     unexported; tools.js is untouched by 3.14.
+//   - The Planner is not imported (spec §06/§11): ExpectedState is consumed
+//     as plain data guarded by a light local shape check (five sections,
+//     mirroring ai.js:399-407). No Planner logic is re-implemented here.
+//
+// DETERMINISM (spec §22): no entropy sources of any kind. Deviation ids are
+// content-derived: FNV-1a over a key-sorted canonical JSON serialization of
+// the deviation content — the same discipline as ai.js:149-166 (§16).
+//
+// House style: single-file module, compact functions, {valid, errors} result
+// objects with {code, message, details?} entries (mirrors ai.js/dsl.js).
+// ============================================================================
+
+// ---- 0. Public pure pieces (spec §51: compose, never export from tools.js) -
+
+import { rectBBox, ellipseBBox } from './geometry.js';
+import { transform as bboxTransform } from './bbox.js';
+
+// ---- 1. Error model (house style; Checkpoint A codes) ----------------------
+
+export const EvaluationErrorCodes = Object.freeze({
+  INVALID_DOCUMENT_CONTEXT: 'INVALID_DOCUMENT_CONTEXT',
+  INVALID_EVALUATION_CONTEXT: 'INVALID_EVALUATION_CONTEXT',
+  INVALID_ACTUAL_STATE: 'INVALID_ACTUAL_STATE',
+  INVALID_DEVIATION: 'INVALID_DEVIATION',
+  INVALID_EVALUATION_RESULT: 'INVALID_EVALUATION_RESULT',
+  INVALID_EXPECTED_STATE: 'INVALID_EXPECTED_STATE'
+});
+
+export class EvaluationError extends Error {
+  constructor(code, message, details){
+    super(message);
+    this.name = 'EvaluationError';
+    this.code = code;
+    if (details !== undefined) this.details = details;
+  }
+}
+
+function createError(code, message, details){
+  const e = { code, message };
+  if (details !== undefined) e.details = details;
+  return e;
+}
+
+// ---- 2. Shared primitive guards + deterministic canonical form (§22) -------
+
+function isPlainObject(v){ return v !== null && typeof v === 'object' && !Array.isArray(v); }
+function isFiniteNumber(v){ return typeof v === 'number' && Number.isFinite(v); }
+function isNonEmptyString(v){ return typeof v === 'string' && v.length > 0; }
+
+// Depth-first scan: returns the path of the first function value, or null.
+function findFunctionPath(value, path){
+  if (typeof value === 'function') return path || '(root)';
+  if (Array.isArray(value)){
+    for (let i = 0; i < value.length; i++){
+      const hit = findFunctionPath(value[i], `${path}[${i}]`);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (isPlainObject(value)){
+    for (const k of Object.keys(value)){
+      const hit = findFunctionPath(value[k], `${path}.${k}`);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+function deepFreeze(value){
+  if (isPlainObject(value) || Array.isArray(value)){
+    for (const k of Object.keys(value)) deepFreeze(value[k]);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+// Key-sorted serialization: identical logical content always yields an
+// identical string, independent of property insertion order (§22).
+function stableStringify(value){
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (isPlainObject(value)){
+    const keys = Object.keys(value).sort();
+    return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+// FNV-1a, 32 bit. Pure integer arithmetic, no entropy, stable across engines
+// (mirrors ai.js:159-166 — the §16 discipline applied to evaluation ids).
+function fnv1a32(str){
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++){
+    h ^= str.charCodeAt(i);
+    h = (h + ((h << 1) >>> 0) + ((h << 4) >>> 0) + ((h << 7) >>> 0) + ((h << 8) >>> 0) + ((h << 24) >>> 0)) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+// A plan-level reference: '$doc:<objectId>' (existing object) or '$<stepId>'
+// (plan-step output) — the two §13 kinds, both '$'-prefixed by the plan
+// reference grammar (ai.js:900-976). Plan-level outcomes may bind NO
+// reference: null (spec §21).
+function isPlanRefOrNull(v){
+  if (v === null) return true;
+  return isNonEmptyString(v) && v.startsWith('$');
+}
+
+// ---- 3. Vocabularies (spec §13) ---------------------------------------------
+
+export const DEVIATION_CATEGORIES = Object.freeze([
+  'existence', 'geometry', 'appearance', 'placement', 'structure', 'transform', 'semantic'
+]);
+
+export const DEVIATION_SEVERITIES = Object.freeze(['error', 'warning']);
+
+// Public pure-piece dispatch for local (parametric-space) bboxes (spec §51).
+// rect/ellipse are the types the Planner can produce (ai.js:680-682); any
+// other type is observed verbatim with worldBBox left null — an unmeasurable
+// geometry is never invented (§15/§19 honesty).
+const LOCAL_BBOX_DISPATCH = Object.freeze({ rect: rectBBox, ellipse: ellipseBBox });
+
+// ---- 4. ActualState (spec §10/§11) ------------------------------------------
+
+// Read surface the doc context must expose (all injected, none imported):
+//   objectStore.get(id)             -> {geometryRef, appearanceRef} | undefined
+//   geometryStore.get(ref)          -> {type, params, ...} | undefined
+//   appearanceStore.get(ref)        -> {stack: [...]} | undefined
+//   sceneGraph.findNodeByObjectId() -> {id, parent, children, ...} | undefined
+//   sceneGraph.findNode(id)         -> {objectRef, ...} | undefined
+//   sceneGraph.getWorldTransform()  -> {a,b,c,d,tx,ty}
+function docContextErrors(ctx){
+  const errors = [];
+  if (!isPlainObject(ctx)){
+    return [createError(EvaluationErrorCodes.INVALID_DOCUMENT_CONTEXT, 'doc context must be a plain object')];
+  }
+  const need = [
+    ['objectStore', 'get'], ['geometryStore', 'get'], ['appearanceStore', 'get'],
+    ['sceneGraph', 'findNodeByObjectId'], ['sceneGraph', 'findNode'], ['sceneGraph', 'getWorldTransform']
+  ];
+  for (const [part, fn] of need){
+    const holder = ctx[part];
+    if (!isPlainObject(holder) || typeof holder[fn] !== 'function'){
+      errors.push(createError(
+        EvaluationErrorCodes.INVALID_DOCUMENT_CONTEXT,
+        `doc context.${part}.${fn}() read surface missing — evaluation consumes injected read-only stores, it never constructs or imports them (spec §10/§11)`,
+        { part, fn }
+      ));
+    }
+  }
+  return errors;
+}
+
+function evaluationContextErrors(ec){
+  if (!isPlainObject(ec)){
+    return [createError(EvaluationErrorCodes.INVALID_EVALUATION_CONTEXT, 'evaluation context must be a plain object')];
+  }
+  if (!Array.isArray(ec.targets) || ec.targets.length === 0){
+    return [createError(EvaluationErrorCodes.INVALID_EVALUATION_CONTEXT, 'evaluation context targets must be a non-empty array of {objectId, targetRef}', { field: 'targets' })];
+  }
+  const errors = [];
+  const seenIds = new Set();
+  const seenRefs = new Set();
+  for (let i = 0; i < ec.targets.length; i++){
+    const t = ec.targets[i];
+    if (!isPlainObject(t) || !isNonEmptyString(t.objectId)){
+      errors.push(createError(EvaluationErrorCodes.INVALID_EVALUATION_CONTEXT, `targets[${i}].objectId must be a non-empty string`, { index: i }));
+      continue;
+    }
+    if (!isPlanRefOrNull(t.targetRef)){
+      errors.push(createError(
+        EvaluationErrorCodes.INVALID_EVALUATION_CONTEXT,
+        `targets[${i}].targetRef must be a '$'-prefixed plan reference ('$doc:<id>' or '$<stepId>') or null (spec §13 reference grammar)`,
+        { index: i, value: t.targetRef }
+      ));
+    }
+    if (seenIds.has(t.objectId)){
+      errors.push(createError(EvaluationErrorCodes.INVALID_EVALUATION_CONTEXT, `duplicate evaluation target '${t.objectId}' — a duplicated target would double-evaluate the object`, { index: i }));
+    }
+    if (t.targetRef !== null && seenRefs.has(t.targetRef)){
+      errors.push(createError(EvaluationErrorCodes.INVALID_EVALUATION_CONTEXT, `duplicate evaluation targetRef '${t.targetRef}' — one reference must bind exactly one object`, { index: i }));
+    }
+    seenIds.add(t.objectId);
+    if (t.targetRef !== null) seenRefs.add(t.targetRef);
+  }
+  return errors;
+}
+
+// Local (parametric-space) bbox through the public pure dispatch. Returns
+// null when the type is not covered or the record is not finitely measurable.
+function localBBoxOf(geometry){
+  const fn = LOCAL_BBOX_DISPATCH[geometry.type];
+  if (!fn) return null;
+  const b = fn(geometry.params);
+  if (!isPlainObject(b) || !['minX', 'minY', 'maxX', 'maxY'].every(k => isFiniteNumber(b[k]))) return null;
+  return b;
+}
+
+// Observed fill projection: the FIRST fill item in stack order (substrate
+// order is authoritative; T07 upserts the fill slot, tools.js:364-373).
+// Observations are verbatim — normalization/comparison happens later at the
+// evaluation boundary (spec §16/§50), not during snapshot construction.
+function observeFill(app){
+  if (!isPlainObject(app) || !Array.isArray(app.stack)) return null;
+  const item = app.stack.find(it => isPlainObject(it) && it.type === 'fill');
+  if (!item || !isPlainObject(item.data)) return null;
+  const d = item.data;
+  if (!isNonEmptyString(d.kind)) return null;
+  if (!isPlainObject(d.color) || !['r', 'g', 'b', 'a'].every(k => isFiniteNumber(d.color[k]))) return null;
+  if (!isFiniteNumber(d.opacity)) return null;
+  if (typeof item.enabled !== 'boolean') return null;
+  return { kind: d.kind, color: { ...d.color }, opacity: d.opacity, enabled: item.enabled };
+}
+
+function observeObject(docCtx, target){
+  const entry = {
+    objectId: target.objectId,
+    targetRef: target.targetRef,
+    exists: false,
+    geometryRef: null,
+    appearanceRef: null,
+    geometry: null,
+    worldTransform: null,
+    worldBBox: null,
+    parentNodeId: null,
+    parentIsGroup: null,
+    childrenNodeIds: [],
+    fill: null
+  };
+  const obj = docCtx.objectStore.get(target.objectId);
+  if (!isPlainObject(obj)) return entry; // §21 substrate: absence is observed, not guessed around
+  entry.exists = true;
+  entry.geometryRef = isNonEmptyString(obj.geometryRef) ? obj.geometryRef : null;
+  entry.appearanceRef = isNonEmptyString(obj.appearanceRef) ? obj.appearanceRef : null;
+  if (entry.geometryRef !== null){
+    const geom = docCtx.geometryStore.get(entry.geometryRef);
+    if (isPlainObject(geom) && isNonEmptyString(geom.type) && isPlainObject(geom.params)){
+      entry.geometry = { type: geom.type, params: JSON.parse(JSON.stringify(geom.params)) };
+    }
+  }
+  if (entry.appearanceRef !== null){
+    entry.fill = observeFill(docCtx.appearanceStore.get(entry.appearanceRef));
+  }
+  const node = docCtx.sceneGraph.findNodeByObjectId(target.objectId);
+  if (isPlainObject(node) && isNonEmptyString(node.id)){
+    entry.parentNodeId = isNonEmptyString(node.parent) ? node.parent : null;
+    entry.childrenNodeIds = Array.isArray(node.children) ? node.children.filter(isNonEmptyString) : [];
+    if (entry.parentNodeId !== null){
+      const parent = docCtx.sceneGraph.findNode(entry.parentNodeId);
+      if (isPlainObject(parent)) entry.parentIsGroup = !parent.objectRef; // group node = objectRef null (scenegraph.js:180)
+    }
+    if (entry.geometry !== null){
+      const local = localBBoxOf(entry.geometry);
+      if (local){
+        const wt = docCtx.sceneGraph.getWorldTransform(node.id);
+        if (isPlainObject(wt) && ['a', 'b', 'c', 'd', 'tx', 'ty'].every(k => isFiniteNumber(wt[k]))){
+          const world = bboxTransform(local, { a: wt.a, b: wt.b, c: wt.c, d: wt.d, tx: wt.tx, ty: wt.ty });
+          if (isPlainObject(world) && ['minX', 'minY', 'maxX', 'maxY'].every(k => isFiniteNumber(world[k]))){
+            entry.worldTransform = { a: wt.a, b: wt.b, c: wt.c, d: wt.d, tx: wt.tx, ty: wt.ty };
+            entry.worldBBox = { minX: world.minX, minY: world.minY, maxX: world.maxX, maxY: world.maxY };
+          }
+        }
+      }
+    }
+  }
+  return entry;
+}
+
+// §11 API — read-only snapshot construction from the authoritative stores.
+// Throws EvaluationError(INVALID_DOCUMENT_CONTEXT / INVALID_EVALUATION_CONTEXT)
+// on contract breaches. The returned snapshot is deep-frozen (§10: immutable
+// once constructed) and deterministic (§22): identical stores + context give
+// byte-identical output. Identity/reference binding comes from the caller
+// (the plan's '$' grammar); observed VALUES come only from the stores.
+export function buildActualState(documentContext, evaluationContext){
+  const ctxErrors = docContextErrors(documentContext);
+  if (ctxErrors.length > 0) throw new EvaluationError(ctxErrors[0].code, ctxErrors[0].message, ctxErrors);
+  const ecErrors = evaluationContextErrors(evaluationContext);
+  if (ecErrors.length > 0) throw new EvaluationError(ecErrors[0].code, ecErrors[0].message, ecErrors);
+  const objects = evaluationContext.targets.map(t => observeObject(documentContext, t));
+  return deepFreeze({ objects });
+}
+
+const ACTUAL_ENTRY_KEYS = Object.freeze([
+  'objectId', 'targetRef', 'exists', 'geometryRef', 'appearanceRef', 'geometry',
+  'worldTransform', 'worldBBox', 'parentNodeId', 'parentIsGroup', 'childrenNodeIds', 'fill'
+]);
+
+function matrixErrors(value, label, errors){
+  if (value === null || value === undefined) return;
+  if (!isPlainObject(value) || !['a', 'b', 'c', 'd', 'tx', 'ty'].every(k => isFiniteNumber(value[k]))){
+    errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `${label} must be null or a finite {a,b,c,d,tx,ty} matrix`, { field: label }));
+  }
+}
+
+function bboxErrors(value, label, errors){
+  if (value === null || value === undefined) return;
+  if (!isPlainObject(value) || !['minX', 'minY', 'maxX', 'maxY'].every(k => isFiniteNumber(value[k]))){
+    errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `${label} must be null or a finite {minX,minY,maxX,maxY} box`, { field: label }));
+  }
+}
+
+function actualEntryErrors(entry, index, errors){
+  const at = `objects[${index}]`;
+  if (!isPlainObject(entry)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `${at} must be a plain object`, { index }));
+    return;
+  }
+  for (const key of ACTUAL_ENTRY_KEYS){
+    if (!Object.prototype.hasOwnProperty.call(entry, key)){
+      errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `${at}.${key} is a mandatory observed field (spec §10/§13)`, { index, field: key }));
+    }
+  }
+  if (!isNonEmptyString(entry.objectId)) errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `${at}.objectId must be a non-empty string`, { index }));
+  if (!isPlanRefOrNull(entry.targetRef)) errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `${at}.targetRef must be null or a '$'-prefixed plan reference`, { index }));
+  if (typeof entry.exists !== 'boolean') errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `${at}.exists must be boolean`, { index }));
+  for (const refField of ['geometryRef', 'appearanceRef']){
+    if (entry[refField] !== null && entry[refField] !== undefined && !isNonEmptyString(entry[refField])){
+      errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `${at}.${refField} must be null or a non-empty string`, { index }));
+    }
+  }
+  if (entry.geometry !== null && entry.geometry !== undefined){
+    const g = entry.geometry;
+    if (!isPlainObject(g) || !isNonEmptyString(g.type) || !isPlainObject(g.params)){
+      errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `${at}.geometry must be null or {type, params}`, { index }));
+    }
+  }
+  matrixErrors(entry.worldTransform, `${at}.worldTransform`, errors);
+  bboxErrors(entry.worldBBox, `${at}.worldBBox`, errors);
+  if (entry.parentNodeId !== null && entry.parentNodeId !== undefined && !isNonEmptyString(entry.parentNodeId)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `${at}.parentNodeId must be null or a non-empty string`, { index }));
+  }
+  if (entry.parentIsGroup !== null && entry.parentIsGroup !== undefined && typeof entry.parentIsGroup !== 'boolean'){
+    errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `${at}.parentIsGroup must be null or boolean`, { index }));
+  }
+  if (!Array.isArray(entry.childrenNodeIds) || !entry.childrenNodeIds.every(isNonEmptyString)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `${at}.childrenNodeIds must be an array of node-id strings`, { index }));
+  }
+  if (entry.fill !== null && entry.fill !== undefined){
+    const f = entry.fill;
+    const colorOk = isPlainObject(f.color) && ['r', 'g', 'b', 'a'].every(k => isFiniteNumber(f.color[k]));
+    if (!isPlainObject(f) || !isNonEmptyString(f.kind) || !colorOk || !isFiniteNumber(f.opacity) || typeof f.enabled !== 'boolean'){
+      errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `${at}.fill must be null or {kind, color:{r,g,b,a}, opacity, enabled} (substrate fill shape, tools.js:364-368)`, { index }));
+    }
+  }
+}
+
+// Verdict over an ActualState snapshot (or any candidate structure). Plain
+// data + all observed fields present + per-field type contracts.
+export function validateActualState(state){
+  const errors = [];
+  if (!isPlainObject(state)){
+    return { valid: false, errors: [createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, 'ActualState must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(state, 'state');
+  if (fnPath) return { valid: false, errors: [createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, `ActualState must be plain data; function value at ${fnPath}`)] };
+  if (!Array.isArray(state.objects) || state.objects.length === 0){
+    errors.push(createError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, 'ActualState.objects must be a non-empty array of observed entries (§10)', { field: 'objects' }));
+    return { valid: false, errors };
+  }
+  for (let i = 0; i < state.objects.length; i++) actualEntryErrors(state.objects[i], i, errors);
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 5. Deviation (spec §13) ------------------------------------------------
+
+// The 11 §13 fields. Every deviation carries ALL of them — absent optional
+// content normalizes to null at creation, so the record shape is total and
+// comparable. targetRef is MANDATORY as a field (gate 7): it names the plan
+// reference that bound the object ('$doc:<id>' / '$<stepId>') or null for a
+// plan-level outcome with no resolvable object (§21).
+const DEVIATION_CONTENT_KEYS = Object.freeze([
+  'category', 'property', 'expected', 'actual', 'delta', 'tolerance',
+  'severity', 'objectId', 'targetRef', 'message'
+]);
+
+function deviationFieldErrors(d, errors){
+  if (!DEVIATION_CATEGORIES.includes(d.category)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, `deviation.category must be one of ${DEVIATION_CATEGORIES.join('/')}`, { field: 'category', value: d.category }));
+  }
+  if (!isNonEmptyString(d.property)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, 'deviation.property must be a non-empty string (e.g. width, fill.color, center)', { field: 'property' }));
+  }
+  if (d.expected !== null && d.expected !== undefined && findFunctionPath(d.expected, 'expected')){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, 'deviation.expected must be plain data (§13/§22)', { field: 'expected' }));
+  }
+  if (d.actual !== null && d.actual !== undefined && findFunctionPath(d.actual, 'actual')){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, 'deviation.actual must be plain data (§13/§22)', { field: 'actual' }));
+  }
+  if (d.delta !== null && d.delta !== undefined && !isFiniteNumber(d.delta)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, 'deviation.delta must be null or a finite number (§13: numeric difference when applicable)', { field: 'delta' }));
+  }
+  if (d.tolerance !== null && d.tolerance !== undefined && (!isFiniteNumber(d.tolerance) || d.tolerance < 0)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, 'deviation.tolerance must be null or a finite number >= 0 (§14: tolerance is part of the contract)', { field: 'tolerance' }));
+  }
+  if (!DEVIATION_SEVERITIES.includes(d.severity)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, `deviation.severity must be one of ${DEVIATION_SEVERITIES.join('/')}`, { field: 'severity', value: d.severity }));
+  }
+  if (d.objectId !== null && d.objectId !== undefined && !isNonEmptyString(d.objectId)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, 'deviation.objectId must be null or a non-empty string', { field: 'objectId' }));
+  }
+  if (!isPlanRefOrNull(d.targetRef)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, "deviation.targetRef must be a '$'-prefixed plan reference ('$doc:<id>' or '$<stepId>') or null (§13)", { field: 'targetRef', value: d.targetRef }));
+  }
+  if (!isNonEmptyString(d.message)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, 'deviation.message must be a non-empty, deterministic, human-readable string', { field: 'message' }));
+  }
+}
+
+// §13 API — deterministic deviation construction. Throws
+// EvaluationError(INVALID_DEVIATION) on content breaches. The id is
+// content-derived (FNV-1a over the key-sorted canonical content, §22): the
+// same evidence always yields the same id, any content change moves it.
+export function createDeviation(content){
+  if (!isPlainObject(content)){
+    throw new EvaluationError(EvaluationErrorCodes.INVALID_DEVIATION, 'createDeviation requires a plain-object content record');
+  }
+  const fnPath = findFunctionPath(content, 'content');
+  if (fnPath) throw new EvaluationError(EvaluationErrorCodes.INVALID_DEVIATION, `deviation content must be plain data; function value at ${fnPath}`);
+  for (const required of ['category', 'property', 'severity', 'message']){
+    if (!Object.prototype.hasOwnProperty.call(content, required) || content[required] === undefined){
+      throw new EvaluationError(EvaluationErrorCodes.INVALID_DEVIATION, `createDeviation requires '${required}' explicitly (deterministic construction, no hidden defaults)`, { field: required });
+    }
+  }
+  const d = {
+    category: content.category,
+    property: content.property,
+    expected: content.expected ?? null,
+    actual: content.actual ?? null,
+    delta: content.delta ?? null,
+    tolerance: content.tolerance ?? null,
+    severity: content.severity,
+    objectId: content.objectId ?? null,
+    targetRef: content.targetRef ?? null,
+    message: content.message
+  };
+  const errors = [];
+  deviationFieldErrors(d, errors);
+  if (errors.length > 0) throw new EvaluationError(errors[0].code, errors[0].message, errors);
+  const id = 'dev-' + fnv1a32(stableStringify({
+    category: d.category, property: d.property, expected: d.expected, actual: d.actual,
+    delta: d.delta, tolerance: d.tolerance, severity: d.severity, objectId: d.objectId,
+    targetRef: d.targetRef, message: d.message
+  }));
+  return deepFreeze({ id, ...d });
+}
+
+// Verdict over a deviation record: all 11 §13 keys present (own-property),
+// id a non-empty string, content fields valid.
+export function validateDeviation(deviation){
+  const errors = [];
+  if (!isPlainObject(deviation)){
+    return { valid: false, errors: [createError(EvaluationErrorCodes.INVALID_DEVIATION, 'Deviation must be a plain object')] };
+  }
+  if (findFunctionPath(deviation, 'deviation')){
+    return { valid: false, errors: [createError(EvaluationErrorCodes.INVALID_DEVIATION, 'Deviation must be plain data')] };
+  }
+  for (const key of ['id', ...DEVIATION_CONTENT_KEYS]){
+    if (!Object.prototype.hasOwnProperty.call(deviation, key)){
+      errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, `deviation.${key} is a mandatory §13 field (targetRef stays mandatory even when its value is null, §21)`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isNonEmptyString(deviation.id)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, 'deviation.id must be a non-empty string (content-derived, §12/§22)', { field: 'id' }));
+  }
+  deviationFieldErrors(deviation, errors);
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 6. EvaluationResult (spec §12) -----------------------------------------
+
+// Light shape guard over the ExpectedState input (§12: "the ExpectedState
+// passed in"). Five sections mirror ai.js:399-407/:439. This is a shape
+// check, NOT a re-implementation of Planner validation (§06) — the Planner
+// owns its own contracts. The alternate status value stays unused here
+// (gate 3): evaluation never relabels desired state as observed state.
+const EXPECTED_STATE_SECTIONS = Object.freeze(['geometry', 'spatial', 'appearance', 'constraint', 'structure']);
+
+function expectedShapeErrors(expected){
+  const errors = [];
+  if (!isPlainObject(expected)){
+    return [createError(EvaluationErrorCodes.INVALID_EXPECTED_STATE, 'expected must be a plain-object ExpectedState (ai.js:399-407)')];
+  }
+  const fnPath = findFunctionPath(expected, 'expected');
+  if (fnPath) return [createError(EvaluationErrorCodes.INVALID_EXPECTED_STATE, `expected must be plain data; function value at ${fnPath}`)];
+  if (!isNonEmptyString(expected.status)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_EXPECTED_STATE, 'expected.status must be a non-empty string (the Planner-produced desired-state marker)', { field: 'status' }));
+  }
+  for (const section of EXPECTED_STATE_SECTIONS){
+    if (!isPlainObject(expected[section])){
+      errors.push(createError(EvaluationErrorCodes.INVALID_EXPECTED_STATE, `expected.${section} section missing or invalid (ExpectedState shape, ai.js:399-407)`, { section }));
+    }
+  }
+  return errors;
+}
+
+// §12 API — deterministic result construction. status derives EXACTLY from
+// the deviations count (gate 5): 'PASS' iff zero, 'DEVIATION' iff > 0.
+// metadata is caller-supplied deterministic content (no timestamps, no
+// random ids — §12/§22); it defaults to an empty frozen object.
+export function createEvaluationResult({ expected, actual, deviations, evaluated, metadata }){
+  const expErrors = expectedShapeErrors(expected);
+  if (expErrors.length > 0) throw new EvaluationError(expErrors[0].code, expErrors[0].message, expErrors);
+  const actCheck = validateActualState(actual);
+  if (!actCheck.valid) throw new EvaluationError(EvaluationErrorCodes.INVALID_ACTUAL_STATE, 'createEvaluationResult requires a valid ActualState snapshot (§10)', actCheck.errors);
+  if (!Array.isArray(deviations)) throw new EvaluationError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, 'deviations must be an array of Deviation records (§13)', { field: 'deviations' });
+  for (let i = 0; i < deviations.length; i++){
+    const check = validateDeviation(deviations[i]);
+    if (!check.valid) throw new EvaluationError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, `deviations[${i}] is not a valid Deviation (§13)`, { index: i, errors: check.errors });
+  }
+  if (!Array.isArray(evaluated) || evaluated.length === 0 || !evaluated.every(isNonEmptyString)){
+    throw new EvaluationError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, 'evaluated must be a non-empty array of checked-category strings (§12)', { field: 'evaluated' });
+  }
+  const meta = metadata === undefined ? {} : metadata;
+  if (!isPlainObject(meta)) throw new EvaluationError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, 'metadata must be a plain object (deterministic content only, §12/§22)', { field: 'metadata' });
+  const metaFn = findFunctionPath(meta, 'metadata');
+  if (metaFn) throw new EvaluationError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, `metadata must be plain data; function value at ${metaFn}`, { field: 'metadata' });
+  const status = deviations.length === 0 ? 'PASS' : 'DEVIATION';
+  return deepFreeze({
+    expected,
+    actual,
+    status,
+    deviations: [...deviations],
+    evaluated: [...evaluated],
+    metadata: { ...meta }
+  });
+}
+
+// Verdict over an EvaluationResult (or candidate): the six §12 fields, the
+// embedded shapes, and the status/length equivalence in BOTH directions.
+export function validateEvaluationResult(result){
+  const errors = [];
+  if (!isPlainObject(result)){
+    return { valid: false, errors: [createError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, 'EvaluationResult must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(result, 'result');
+  if (fnPath) return { valid: false, errors: [createError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, `EvaluationResult must be plain data; function value at ${fnPath}`)] };
+  for (const key of ['expected', 'actual', 'status', 'deviations', 'evaluated', 'metadata']){
+    if (!Object.prototype.hasOwnProperty.call(result, key)){
+      errors.push(createError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, `EvaluationResult.${key} is a mandatory §12 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  errors.push(...expectedShapeErrors(result.expected).map(e => createError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, `result.expected: ${e.message}`, e.details)));
+  const actCheck = validateActualState(result.actual);
+  if (!actCheck.valid){
+    for (const e of actCheck.errors) errors.push(createError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, `result.actual: ${e.message}`, e.details));
+  }
+  if (result.status !== 'PASS' && result.status !== 'DEVIATION'){
+    errors.push(createError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, "result.status must be 'PASS' or 'DEVIATION' (§12)", { field: 'status', value: result.status }));
+  }
+  if (!Array.isArray(result.deviations)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, 'result.deviations must be an array (§12)', { field: 'deviations' }));
+  } else {
+    for (let i = 0; i < result.deviations.length; i++){
+      const check = validateDeviation(result.deviations[i]);
+      if (!check.valid){
+        for (const e of check.errors) errors.push(createError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, `result.deviations[${i}]: ${e.message}`, e.details));
+      }
+    }
+  }
+  if (!Array.isArray(result.evaluated) || result.evaluated.length === 0 || !result.evaluated.every(isNonEmptyString)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, 'result.evaluated must be a non-empty array of checked-category strings (§12)', { field: 'evaluated' }));
+  }
+  if (!isPlainObject(result.metadata)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, 'result.metadata must be a plain object (deterministic content only)', { field: 'metadata' }));
+  }
+  // Gate 5 enforcement — the equivalence holds in both directions:
+  const passLength = Array.isArray(result.deviations) ? result.deviations.length === 0 : false;
+  if (result.status === 'PASS' && !passLength){
+    errors.push(createError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, "result.status rule (§12/gate 5): status 'PASS' requires deviations.length === 0", { status: result.status, deviationCount: Array.isArray(result.deviations) ? result.deviations.length : null }));
+  }
+  if (result.status === 'DEVIATION' && passLength){
+    errors.push(createError(EvaluationErrorCodes.INVALID_EVALUATION_RESULT, "result.status rule (§12/gate 5): status 'DEVIATION' requires deviations.length > 0", { status: result.status, deviationCount: 0 }));
+  }
+  return { valid: errors.length === 0, errors };
+}
