@@ -1,0 +1,5 @@
+pre-battery pristine match: e72e296ba17b81a0aa0ebfe10bc8bebbda1e48900c1ebb345619a6bab53a103a
+KILL-OK KILL-C1 (derivation carry-as-is): failed set == prediction (8 tests), exit=1
+KILL-OK KILL-C2 (hard rejection removed): failed set == prediction (2 tests), exit=1
+post-restore: exit=0, sha=e72e296ba17b81a0aa0ebfe10bc8bebbda1e48900c1ebb345619a6bab53a103a (pristine match verified)
+STUBKILL PROOF: PASS

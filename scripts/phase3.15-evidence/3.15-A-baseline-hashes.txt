@@ -1,0 +1,8 @@
+# PHASE 3.15 — CHECKPOINT A baseline hashes (captured BEFORE any modification; tree clean at 70fd6a9, branch feat/phase-3.15-correction-loop)
+# Sources-of-truth references that MUST remain byte-identical through Checkpoint A:
+e3df6696dd828f67ccd6dd39ccaa270ae1fae1f67a8d1b6596800846cf0cfb6e  src-js/ai.js
+a719a433f7980950b239743253c1d4912a4d0dfe0418b95194e9346224bacf5c  src-js/evaluation.js
+0ab9f7f03aa2db8383d569fc3c897264a4679f1d7e8fca369b05ba3a54fac722  src-js/critic.js
+5ec1369b16c1294101e19d45bece4250be5fdcb1d1878eb07d6de87e5c0ea5e4  src-js/transaction.js
+66048cffb63cbbda64b97b7f18436d3bf38ffbc9ddc3fb6e113944c2364805ef  scripts/run-suite.sh
+b329cc0d410cef4fe81fa75deec5f2ad7655974c2ecdda13c1f669a12e8da965  package.json

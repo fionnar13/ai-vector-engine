@@ -1,0 +1,11 @@
+KILL-E1 observed failing set (3.15-E-stubkill-E1-run1.txt):
+  E-1 E-4 E-5 E-6 E-7 E-8 E-10 E-11 E-13 E-16 E-18 E-19 E-21 E-22  (14)
+KILL-E1 prediction: SAME 14 -> EXACT-MATCH (first try)
+
+KILL-E2 observed failing set (3.15-E-stubkill-E2-run1.txt):
+  E-11 E-12 E-13 E-14 E-15 E-17  (6)
+KILL-E2 prediction: SAME 6 -> EXACT-MATCH (first try)
+
+Both kills: EXACT-MATCH first-try, no prediction self-correction required.
+Restore: correction.js.checkpointE.green restored; post-restore green = 119/119
+(3.15-E-post-restore-green.txt); md5 2cc9c156291bb38aa5b4701b53408fdd == green.

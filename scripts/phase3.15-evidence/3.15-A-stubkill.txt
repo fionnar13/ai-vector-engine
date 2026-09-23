@@ -1,0 +1,6 @@
+pre-battery pristine match: 4c50f8fe03d8752be8fdd8f8935fd6db6aad5381d8302bac60572729e36b43bc
+KILL-OK KILL-1 (canTransition always true): failed set == prediction (3 tests), exit=1
+KILL-OK KILL-2 (trail append removed): failed set == prediction (3 tests), exit=1
+KILL-OK KILL-3 (termination discipline removed): failed set == prediction (2 tests), exit=1
+post-restore: exit=0, sha=4c50f8fe03d8752be8fdd8f8935fd6db6aad5381d8302bac60572729e36b43bc (pristine match verified)
+STUBKILL PROOF: PASS

@@ -1,0 +1,11 @@
+=== KILL-F1: §32 rollback neutered (undo skipped, record fabricated) ===
+KILL-F1 applied
+KILL-F1: EXACT-MATCH (11 tests)
+restore sha-verified: d27de7e967863407c0fe27ba81547c3b0369b34b11b6b791a735c10efef19a4c
+=== KILL-F2: §14 acceptance neutered (verdict forced ACCEPTED/IMPROVED) ===
+KILL-F2 applied
+KILL-F2: EXACT-MATCH (13 tests)
+restore sha-verified: d27de7e967863407c0fe27ba81547c3b0369b34b11b6b791a735c10efef19a4c
+=== post-restore green ===
+Tests: 132 total, 132 passed, 0 failed
+STUBKILL PROOF: PASS

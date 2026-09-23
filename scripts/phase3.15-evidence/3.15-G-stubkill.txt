@@ -1,0 +1,48 @@
+=== PHASE 3.15 Checkpoint G stub-kill battery 2026-09-23T02:01:36Z ===
+pre-battery pristine match: 9e31da8dff4be9b5eedea67dd2f7e425ada7e53d9338bef6e083bdeae2a00fe2
+package.json pre-battery snapshot: b329cc0d410cef4fe81fa75deec5f2ad7655974c2ecdda13c1f669a12e8da965
+--- KILL-G1: correction.js += alias-form eval/Function/fetch/window/document references (never invoked) ---
+  Tests: 144 total, 143 passed, 1 failed
+KILL-G1: rc=1
+  predicted: G-2 
+  observed : G-2 
+  verdict  : EXACT-MATCH
+  restore: sha256 OK (9e31da8dff4be9b5eedea67dd2f7e425ada7e53d9338bef6e083bdeae2a00fe2)
+--- KILL-G2: correction.js += direct store/scene/history/renderer/wc mutation calls (never invoked) ---
+  Tests: 144 total, 140 passed, 4 failed
+KILL-G2: rc=1
+  predicted: G-3 G-4 G-5 G-6 
+  observed : G-3 G-4 G-5 G-6 
+  verdict  : EXACT-MATCH
+  restore: sha256 OK (9e31da8dff4be9b5eedea67dd2f7e425ada7e53d9338bef6e083bdeae2a00fe2)
+--- KILL-G3: correction.js += autonomous/deferred execution forms + dynamic import (never invoked) ---
+  Tests: 144 total, 141 passed, 3 failed
+KILL-G3: rc=1
+  predicted: G-1 G-10 G-7 
+  observed : G-1 G-10 G-7 
+  verdict  : EXACT-MATCH
+  restore: sha256 OK (9e31da8dff4be9b5eedea67dd2f7e425ada7e53d9338bef6e083bdeae2a00fe2)
+--- KILL-G4: correction.js += second begin-receiver + nest/DAG words + substrate construction (never invoked) ---
+  Tests: 144 total, 141 passed, 3 failed
+KILL-G4: rc=1
+  predicted: G-5 G-6 G-9 
+  observed : G-5 G-6 G-9 
+  verdict  : EXACT-MATCH
+  restore: sha256 OK (9e31da8dff4be9b5eedea67dd2f7e425ada7e53d9338bef6e083bdeae2a00fe2)
+--- KILL-G5: correction.js += while(true) probe (never invoked) ---
+  Tests: 144 total, 143 passed, 1 failed
+KILL-G5: rc=1
+  predicted: G-8 
+  observed : G-8 
+  verdict  : EXACT-MATCH
+  restore: sha256 OK (9e31da8dff4be9b5eedea67dd2f7e425ada7e53d9338bef6e083bdeae2a00fe2)
+--- KILL-G6: package.json += dependencies field (file-level run; ai.test.mjs G-5 / evaluation-critic.test.mjs G-8 would also flip at suite level — documented) ---
+  Tests: 144 total, 143 passed, 1 failed
+KILL-G6: rc=1
+  predicted: G-10 
+  observed : G-10 
+  verdict  : EXACT-MATCH
+  restore: sha256 OK (b329cc0d410cef4fe81fa75deec5f2ad7655974c2ecdda13c1f669a12e8da965)
+--- post-restore green run ---
+  Tests: 144 total, 144 passed, 0 failed (rc=0)
+STUBKILL PROOF: PASS (6 kills, exact predicted sets, sha256-verified restores)

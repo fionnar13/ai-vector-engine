@@ -1,0 +1,6 @@
+pre-battery pristine match: 960eb5b572b2d8eddcac96ba6b49d9f8efeee9e6619f369f909222af9d440818
+KILL-OK KILL-D1 (execution fabricated): failed set == prediction (11 tests), exit=1
+KILL-OK KILL-D2 (acceptance always ACCEPTED): failed set == prediction (4 tests), exit=1
+KILL-OK KILL-D3 (rollback reports without undoing): failed set == prediction (3 tests), exit=1
+post-restore: exit=0, sha=960eb5b572b2d8eddcac96ba6b49d9f8efeee9e6619f369f909222af9d440818 (pristine match verified)
+STUBKILL PROOF: PASS

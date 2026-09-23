@@ -1,0 +1,10 @@
+file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:119
+  CORRECTION_CAPABILITY_INPUT_CONTRACT, CONSTRAINT_PINNED_AXES, TOOL_MUTATION_AXES,
+                                        ^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: The requested module '../src-js/correction.js' does not provide an export named 'CONSTRAINT_PINNED_AXES'
+    at #asyncInstantiate (node:internal/modules/esm/module_job:455:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:553:5)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.21.0

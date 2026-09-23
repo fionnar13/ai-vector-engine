@@ -1,0 +1,3335 @@
+// PHASE 3.15 — CORRECTION LOOP EXECUTION (single-file module, house style).
+// Spec: PHASE 3.15 "Correction Loop Execution" §0-§72 + Working Discipline.
+// Closes the execution-feedback-correction loop between PHASE 3.13 (ai.js) and
+// PHASE 3.14 (evaluation.js / critic.js):
+//
+//   PLAN -> EXECUTE -> CRITIQUE -> DIAGNOSE -> CORRECT -> RE-EXECUTE -> VERIFY (§0)
+//
+// CHECKPOINT A SCOPE (this revision): the core data structures and the §3/§5
+// state machine only — CorrectionLoopSession (§4), CorrectionAttempt (§6),
+// CorrectionTarget (§7), CorrectionDiagnosis (§8), CorrectionStrategy (§9),
+// CorrectionPlan (§10), CorrectionLoopPolicy (§18), CorrectionTerminationReason
+// (§50), canTransition / transitionSession / terminateSession. The engine
+// wiring (§24 contract: start/iterate/run/rollback, delta computation §13,
+// acceptance §14, regression §15, best-state §16, convergence/oscillation §17,
+// fingerprints §30, audit §46) lands in the later checkpoints — NOTHING here
+// executes transactions or touches stores; Checkpoint A is pure data + pure
+// state mechanics.
+//
+// CHECKPOINT B SCOPE (this revision adds): §8 diagnosis resolution — the
+// category→rootCause attribution table, capability-grounded strategy
+// instantiation (CORRECTION_CAPABILITY_RECIPES), the §28 no-fabrication
+// NO_CAPABILITY path, §20 CorrectionImpact, §38 CorrectionCost, §19
+// deterministic strategy ranking, §27 explainability. STILL zero imports,
+// zero entropy, zero store/tool access: the capability table PINS toolIds as
+// strings and the TEST SUITE verifies them against the live tools.js
+// registry (3.14 Checkpoint C grounding discipline) — the module itself
+// never imports the registry, so the import contract stays pinned at zero.
+//
+// IMPORT CONTRACT (pinned): ZERO imports. All helpers are local copies in the
+// house single-file style (mirrors evaluation.js/critic.js, which also carry
+// private fnv1a32/stableStringify/deepFreeze copies). The module never reads
+// files, never imports node builtins, never constructs stores, and never
+// executes tools — the architecture scans pin this.
+//
+// DESIGN DISCLOSURES (spec-vocabulary decisions taken where the spec text is
+// prose-only or names a concept twice; none alters a §-typedef field list):
+//   1. §4 defines the session field `rootTransactionId`; §12's prose calls it
+//      `parentTransactionId`. The §4 typedef is formal and wins: the field is
+//      `rootTransactionId`. Disclosed here and in the checkpoint report.
+//   2. §3 draws five failure/completion paths whose STATE names differ from
+//      the §5 vocabulary ('ROLLBACK' -> ROLLING_BACK) or are path LABELS, not
+//      states ('UNRESOLVED', 'CORRECTION_FAILED', 'REGRESSION', 'NO_PROGRESS').
+//      The map below uses §5 names; the §3 labels survive as the semantic
+//      reasons documented on each edge.
+//   3. Five edges beyond the literal §3 diagram are REQUIRED for the loop the
+//      rest of the spec describes, each derived from a spec section:
+//        EVALUATING    -> VERIFIED      (§17 Verified: all criteria satisfied —
+//                                        the clean pass where nothing needs
+//                                        correcting; without it a zero-deviation
+//                                        document could never verify)
+//        RE_EVALUATING -> DIAGNOSING    (the §0/§16/§17 iteration cycle: after a
+//                                        non-verified, non-regressed, progressing
+//                                        re-evaluation the loop diagnoses again)
+//        ROLLING_BACK  -> DIAGNOSING    (§69: a rejected correction is followed
+//                                        by "Correction #2" — retry after rollback)
+//        ROLLING_BACK  -> TERMINATED    (give-up after rollback; §50 EXECUTION_ERROR)
+//        VERIFIED      -> TERMINATED    (§4 terminationReason + §50 VERIFIED: the
+//                                        verified session formally closes)
+//   4. §53 grants user cancellation at ANY iteration. terminateSession accepts
+//      USER_CANCELLED from EVERY non-terminated state (a user-authority
+//      overlay); every OTHER §50 reason still requires a §3/§5 map edge into
+//      TERMINATED. The map itself stays exactly the §3-derived graph.
+//   5. A TERMINATED session MUST carry its §50 reason (both directions,
+//      mirroring evaluation.js §12 gate-5 status/length discipline): the
+//      reasonless direct jump transitionSession(s,'TERMINATED') is refused
+//      with INVALID_TERMINATION even though RE_EVALUATING->TERMINATED remains
+//      a legal canTransition edge — the sanctioned path is terminateSession.
+//   6. Ids are content-derived (fnv1a32 over key-sorted canonical JSON of the
+//      content, house §12/§22/§44 pattern) with implementation prefixes:
+//      loop- / attempt- / ctarget- / diag- / strategy- / cplan-. The spec does
+//      not fix prefixes. Session ids hash the INITIAL content only, so the id
+//      is stable across transitions (state/trail evolve, identity does not).
+//   7. Confidence contracts: target/diagnosis confidence is a finite number in
+//      [0,1] (measurements may legitimately carry 0 — cf. §8 UNKNOWN);
+//      STRATEGY confidence is (0,1] — a zero-confidence strategy can never be
+//      ranked (§19 Priority = Severity × Confidence × Impact × Correctability)
+//      and can only arise from a defect.
+//   8. Error model mirrors the house pattern (evaluation.js:54-77): nine codes
+//      (INVALID_SESSION/ATTEMPT/TARGET/DIAGNOSIS/STRATEGY/PLAN/POLICY/
+//      TRANSITION/TERMINATION). The spec does not fix error codes.
+//   9. §4's evaluation-typed fields (initialEvaluation/currentEvaluation/
+//      bestEvaluation) and §6's beforeEvaluation/afterEvaluation are shape-
+//      guarded as plain data here — the full §12 validation authority remains
+//      in evaluation.js (the Critic/Evaluation stays the authority, §22/§23);
+//      Checkpoint A never imports it (see the pinned zero-import contract).
+//  10. §6 attempt ids hash the full record content INCLUDING status: each
+//      status stage is a distinct immutable audit record (records are never
+//      mutated in place — the engine checkpoints append stage records to
+//      session.corrections).
+// CHECKPOINT B DISCLOSURES (approved-decision implementations + new
+// spec-silent vocabulary, each disclosed in the checkpoint report):
+//   11. The §7→§8 attribution table maps all 11 categories onto the 10 §8
+//       causes: SYMMETRY shares ALIGNMENT_ERROR (a symmetry deviation is a
+//       relational-placement error) and TEXT shares SEMANTIC_ERROR (text
+//       content is document semantics). UNKNOWN is never emitted by the
+//       resolver — it remains the vocabulary member for externally
+//       constructed diagnoses.
+//   12. §28 no-fabrication vs the ACCEPTED Checkpoint A contract (a diagnosis
+//       carries >=1 recommended strategy; an EMPTY array is INVALID_DIAGNOSIS
+//       — pinned by probe and regression-guarded by B-10): where no
+//       executable capability matches, resolveCorrectionDiagnosis returns a
+//       frozen NO_CAPABILITY resolution {status,targetId,category,rootCause,
+//       metric,objectIds} — the §3 'UNRESOLVED' path label (disclosure 2) —
+//       and NEVER a strategy-less diagnosis. Provenance: T19/T20 are
+//       proposal-class and T16-T18 read-class in tools.js; only mutation
+//       tools can back executable corrections.
+//   13. Capability grounding: CORRECTION_CAPABILITY_RECIPES reference ONLY
+//       registered toolIds; command descriptors carry {kind, toolId, input}
+//       where kind mirrors the real transaction.js command factories
+//       (MoveObject, TransformObject, UpdateAppearance, SetZOrder, CreateNode,
+//       DeleteNode). Table confidence is uniformly 1 (direct mappings only —
+//       a lower value would imply speculative strategies); ranking stays
+//       general over any (0,1] confidence for externally supplied strategies
+//       and differentiates through the other §19 factors.
+//   14. Metric matching is exact-or-dot-boundary prefix, case-sensitive (the
+//       house metric vocabulary is lowercase dotted, e.g.
+//       'alignment.deviation.px'); structure recipes pin dot-precise
+//       sub-namespaces ('structure.zorder' vs 'structure.grouping'). The
+//       group/ungroup pair deliberately CO-RECOMMENDS on
+//       'structure.grouping': both are capability-grounded candidates and
+//       the §19 ranking plus the loop's try-order disambiguates them (§28
+//       bars corrections with NO capability basis, not ranked candidates).
+//       Unmatched metrics yield NO_CAPABILITY (§28), never a guessed
+//       strategy.
+//   15. §19 numeric encodings (the spec names the product, not the encodings):
+//       Severity LOW..CRITICAL = 1..4; Impact weight by §20 scope
+//       LOCAL=1, SUBTREE=0.5, GLOBAL=0.25 (among equally-confident candidates
+//       for the SAME deviation, the narrower blast radius ranks first);
+//       Correctability reversible=1, irreversible=0.5. Priority is therefore
+//       strictly positive for every legal strategy (disclosure 7).
+//   16. §20 CorrectionImpact is derived from the scene-independent capability
+//       profile (CORRECTION_TOOL_SCOPE): SUBTREE records the affected subtree
+//       ROOTS (the target objects); descendant enumeration is execution-time
+//       with scene access (a later checkpoint). Unknown toolIds default to
+//       GLOBAL (conservative).
+//   17. §38 CorrectionCost: total = riskWeight(LOW=1,MEDIUM=2,HIGH=3) ×
+//       (commandCount + objectCount), objectCount = unique objectIds across
+//       command inputs. Cost REPORTS (§38); it is not a §19 factor (the
+//       spec's formula has exactly four).
+//   18. Ranking requires diagnosis.targetId === target.id (§8 coherence);
+//       every recommendedStrategies entry is re-validated as a §9 strategy;
+//       ties keep recommendation order (explicit stable tie-break, no
+//       entropy). The deterministic output chain is: target input order →
+//       category (table) → objectId (target order preserved) → property
+//       (metric prefixes) → strategy (recipe declaration order).
+//
+// CHECKPOINT C SCOPE (this revision adds): §10/§11 CorrectionPlan GENERATION —
+// the planning pipeline that turns a diagnosis + selected strategy into a
+// session-bound, factory-anchored, safety-checked §10 plan, plus the §42
+// preview. New surfaces: the capability input contract (a local mirror of the
+// live T05-T12 validator requirements), layered command materialization
+// (CARRIED / DERIVED / NOT_DERIVABLE — §43 rule-based, never fabricated), the
+// §41 dependency scan (injected duck-typed context), the §35-§37 planning-time
+// hard-constraint safety gate (REJECT is a first-class refusal record), §40
+// scope control, and the §42 dry-run preview. STILL zero imports, zero
+// entropy, zero store/tool/scene access: contexts are INJECTED plain data and
+// duck-typed readers (the evaluation.js documentContext discipline), and the
+// TEST SUITE verifies every pinned contract against the live registry and the
+// live transaction.js factories. NO §14 acceptance here — §14 acceptance
+// belongs EXCLUSIVELY to Checkpoint D (the approved C-20 ruling: the C-era
+// export surface deliberately carried no acceptance API; D landed acceptance
+// in this module per directive and the C-20 guard evolved to pin the exact D
+// acceptance export set — see CHECKPOINT D SCOPE below).
+//
+// CHECKPOINT C DISCLOSURES (19-23; each disclosed in the checkpoint report):
+//   19. CORRECTION_CAPABILITY_INPUT_CONTRACT is a LOCAL mirror of the live
+//       T05-T12 validator requirements — shape CLASSES only (string[], vec2,
+//       matrix, string, number + minObjectIds); enum VALUES (axis/mode/
+//       operation vocabularies) remain the tools' authority, checked by the
+//       live registry at execution. The test suite proves the mirror BOTH
+//       necessary (omitting any contract key fails the live validator) and
+//       sufficient (contract-complete inputs pass it) — C-18. Materialization
+//       is layered and honest: CARRIED (schema-complete strategy input passes
+//       through untouched) → DERIVED (deterministic rules from target
+//       evidence: T05 axis delta from 'position.x'/'position.y' — §43's own
+//       "Move +10px -> position delta" example; T07 opacity from
+//       opacity-class metrics; objectIds from the target when absent) →
+//       NOT_DERIVABLE (refused; §28 extended to planning: no fabricated
+//       parameters). Rule-less tools (T06/T08/T09/T10/T11/T12) plan only from
+//       schema-complete carried inputs; richer materialization is execution-
+//       time with scene access (a later checkpoint).
+//   20. The planning-time safety gate (§35-§37) is rule-based and
+//       axis-conservative (§43 sanctions rule-based prediction):
+//       CONSTRAINT_PINNED_AXES models the geometry each constraint TYPE pins;
+//       TOOL_MUTATION_AXES models the geometry each capability mutates (T05
+//       from the concrete delta; T08/T09 refined by a carried axis param;
+//       T06/T10/T11 conservatively all geometric axes; T07/T12 none; unknown
+//       toolId conservative). A hard constraint (strength 'required',
+//       enabled) on a mutated axis — or of UNKNOWN type — cannot be proven
+//       preserved and REJECTS the plan with the exact §35
+//       ConstraintCorrectionContext; soft conflicts are recorded trade-offs
+//       (§37); disabled constraints are invisible (the evaluateConstraint
+//       semantics, constraints.js:92). Numeric verification of preservation
+//       is the acceptance-time authority (Checkpoint D, §14) via evaluation.js
+//       — this gate is the planning-time bias, not the acceptance verdict.
+//   21. The §42 expectedEvaluation is a §43 RULE_BASED prediction record —
+//       NOT an EvaluationResult (the §12 authority stays in evaluation.js; no
+//       fabricated §12 records). §37 trade-offs are RECORDED on
+//       plan.riskAssessment.constraints (omit-absent when no constraint
+//       context was provided); the evaluation-side recording of trade-offs
+//       happens in D's re-evaluation metadata.
+//   22. The §41 scan is injected-context duck-typed (the evaluation.js
+//       documentContext discipline): scene via {findNodeByObjectId},
+//       constraints as plain records (the ConstraintStore.list() output
+//       shape), semantic as plain records ({objectId, relationships} — the
+//       semantic.js validateSemanticData shape). Absent stages are reported
+//       UNSCANNED (per-stage scanned flags) — never silently "empty because
+//       checked". Scan-domain input breaches throw INVALID_PLAN (the
+//       planning bucket of the 9-code model).
+//   23. The deterministic planning chain extends disclosure 18: commands stay
+//       in strategy order (per-command derivation in input order);
+//       preconditions objects-exist → tools-available → hard-constraints-
+//       preserved; postconditions metric-moves-toward-target → hard-
+//       constraints-intact; preview affectedObjects = target order then §20
+//       secondary order (deduped); mutation axes in canonical order
+//       x, y, width, height. Evidence-based non-plans are REFUSAL RECORDS
+//       (INSUFFICIENT_EVIDENCE / HARD_CONSTRAINT_REJECTED / OUT_OF_SCOPE —
+//       PLAN_REFUSAL_REASONS), never throws; incoherent INPUTS throw the
+//       structure-specific codes (the A/B discipline).
+//
+// CHECKPOINT D SCOPE (this revision adds): §11/§12 EXECUTION + the §14
+// acceptance policy + the loop-safety machinery. executeCorrectionAttempt
+// turns a CorrectionPlan into ONE INDEPENDENT substrate transaction per
+// attempt — TransactionBuilder.begin({id}) with a content-derived 'atx-' id,
+// parentId = the session root (lineage, never nesting) — whose Commands route
+// the plan descriptors through the LIVE tools (pre-flight registry validation;
+// runtime failures fail the transaction ATOMICALLY: stores untouched, nothing
+// pushed). acceptCorrectionAttempt is the §14 verdict (post > pre on the plan
+// metric, §15 critical-regression gate, structural validity, transaction
+// validity) emitting the IMPROVED/REGRESSED/NO_EFFECT stage record;
+// detectCorrectionRegression is the §15 RegressionReport; §16 best-state
+// preservation (deterministic total order — the loop never assumes last is
+// best); §30 CorrectionFingerprint + evaluation fingerprint; §33 no-progress
+// SKIP (same fingerprint + Δ=0); §31 oscillation (fingerprint recurrence);
+// rollbackCorrectionAttempt rides the substrate's OWN undo API (§32) behind a
+// top-of-history guard; buildCorrectionHistoryMetadata is the §47/§48
+// session-local metadata with the HistoryManager UNTOUCHED and LINEAR
+// (invariant 13). The module stays ZERO-IMPORT: the live substrate is
+// INJECTED and duck-typed, and the test suite binds the REAL
+// transaction.js/tools.js substrate at the call site.
+//
+// CHECKPOINT D DISCLOSURES (24-32; each disclosed in the checkpoint report):
+//   24. Injected substrate contract (the zero-import pin stands):
+//       substrate = {registry: {has, get, validate}, transactionManager:
+//       {execute, undo, historyManager}, transactionBuilder: {begin,
+//       addCommand, build}, sceneGraph?: {findNodeByObjectId,
+//       getWorldTransform}} — all duck-typed, never constructed here. The
+//       test suite binds the LIVE ToolRegistry / TransactionExecutor /
+//       TransactionBuilder / SceneGraph.
+//   25. Deterministic execution ids: the attempt transaction id is
+//       'atx-' + fnv1a32 over {sessionId, planId, targetId, iteration} and is
+//       passed EXPLICITLY through TransactionBuilder.begin({id}); command ids
+//       are 'ccmd-' over {planId, commandIndex, toolId}. Substrate runtime
+//       artifacts (the factories' own uuid command ids, createTransaction's
+//       createdAt, EventBus event ids) NEVER enter canonical records — D-20
+//       scans the canonical JSON for both.
+//   26. Execution routes plan descriptors through the LIVE TOOLS (pre-flight
+//       registry.validate schema gate; tool.validate + tool.execute inside
+//       wrapper Commands), NOT through the raw single-object factories —
+//       createMoveObjectCommand takes {objectId, dx, dy} where plans carry
+//       the tool contract {objectIds, delta}, and the T06 factory is a
+//       documented latent no-op (tools.js:329-332). The tool route IS the
+//       Command -> Transaction -> WorkingCopy -> Validate -> Diff -> Commit
+//       pipeline (no boundary bypass, no direct SceneGraph mutation); C-18
+//       already proved generator outputs live-validator-clean. Wrapper
+//       getInverse is declared ONLY where tool semantics are exactly
+//       invertible (T05 translation negation); everything else takes the
+//       executor's own §32 snapshot fallback (transaction.js:211-218).
+//   27. Pre-flight refusals are EXECUTION_REFUSED records
+//       (CORRECTION_EXECUTION_REFUSALS = TOOLS_UNAVAILABLE /
+//       TOOL_VALIDATION_FAILED) — never thrown, never executed (the C
+//       refusal-record discipline carried into execution). Enum VALUES are
+//       checked LIVE at pre-flight: the disclosure-19 shape-class mirror
+//       deliberately diverges from the live validators on enums, and
+//       execution is where the tools' authority bites.
+//   28. §14 acceptance operationalization (the spec names the criteria; the
+//       measurement is implementation): the metric gap is read from the
+//       deviation records — exact-or-dot-boundary property matching
+//       (disclosure 14 reused), gap = max |actual − to| over matching
+//       deviations on the target objects (plan-level objectId null counts);
+//       no matching deviation = the metric is AT TARGET (gap 0);
+//       non-finite actuals in numeric mode = METRIC_INVALID; when plan.to is
+//       null the gap is the matching-deviation COUNT. Criterion 1 is STRICT
+//       improvement > 0. §15 criticality: the target metric regressing
+//       beyond policy.maximumRegression, ANY new error-severity deviation
+//       (global conservatism — a correction must not damage anything), or a
+//       persisted deviation worsening beyond policy.maximumRegression.
+//       Structural validity is REMAINS-TRUE: only NEW structure-category
+//       deviations count (pre-existing damage persisting unchanged is not
+//       damage by this correction). Transaction validity = the EXECUTED
+//       stage attestation, cross-checked against an optional execution
+//       projection when supplied (absent -> checked:false, never silently
+//       "verified"). Rejection reasons are emitted in vocabulary order; a
+//       metric regression SUBSUMES NO_IMPROVEMENT (a worse state is not
+//       "no improvement"). REJECTED+critical -> REGRESSED (the §3 rollback
+//       disposition; §18 rollbackOnCriticalRegression reported for the loop
+//       driver); REJECTED otherwise -> NO_EFFECT and KEPT — the §3 rollback
+//       edge is the REGRESSION path, the no-progress path terminates.
+//   29. §15 deviation identity across evaluations = category|property|
+//       objectId (real §13 ids are content-derived and change when content
+//       changes — identity, not id, is the honest cross-evaluation join);
+//       worsened growth = |afterDelta| − |beforeDelta| over the identity
+//       pair. The report records facts; the §18 policy supplies the tolerance.
+//   30. §16 best-state order: (errorCount, warningCount, sorted deviation-id
+//       list) compared lexicographically — errors dominate warnings, content
+//       breaks ties. isBetter is STRICT (equal content is not better);
+//       preserveBestState=false disables preservation (best follows current;
+//       §18 flag semantics).
+//   31. §31/§33: the evaluation fingerprint is 'efp-' over {status, sorted
+//       deviation ids}; oscillation = ANY fingerprint recurrence in the
+//       iteration trail (first recurrence reported). SKIP = the candidate
+//       plan's §30 fingerprint equals the previous attempt's AND that attempt
+//       produced Δ=0 (identical evaluation fingerprints); Δ≠0 legitimizes the
+//       §69 correction-#2 retry. D input breaches keep the 9-code model
+//       (disclosure 8): executeCorrectionAttempt envelope breaches ->
+//       INVALID_PLAN (the C planning bucket, disclosure 22 precedent);
+//       acceptance / rollback / regression / evaluation-fingerprint /
+//       oscillation / best-state breaches -> INVALID_ATTEMPT.
+//   32. §47/§48: the history metadata is {source:'correction', sessionId,
+//       attemptId, transactionId, iteration, attemptStatus} — session-local
+//       iteration metadata ONLY. The HistoryManager is UNTOUCHED: its
+//       linear truncation-on-push IS invariant 13 (undo + new attempt yields
+//       a flat array — proven, not assumed). rollbackCorrectionAttempt
+//       REQUIRES the attempt transaction to be top-of-history
+//       (getTransactionToUndo pre-check) and REFUSES otherwise — it never
+//       undoes a foreign transaction; "Undo AI operation" is the host
+//       consuming the metadata through the EXISTING substrate undo.
+//
+// CHECKPOINT E SCOPE (this revision adds): §17 CONVERGENCE + §22-§26 the
+// ENGINE. CorrectionEngine is the loop DRIVER over the frozen §3/§5 machine:
+// §24's five operations (start/iterate/run/terminate/rollback) as pure
+// functions over immutable engine states; §25 CorrectionLoopRequest; §26
+// modes (AUTO/GUIDED/SINGLE_STEP) behind a deterministic dispatch table; §17
+// convergence detection (VERIFIED / NO_PROGRESS / OSCILLATION_DETECTED /
+// MAX_ITERATIONS_REACHED) as the engine's judgment OVER the critic's records;
+// §22/§23 critic integration — the loop is a CONSUMER ONLY: every evaluation,
+// initial and per-iteration, comes from the injected duck-typed critic. STILL
+// zero imports: the critic and the substrate are INJECTED at the call site;
+// the test suite binds the LIVE evaluation.js authority and the LIVE
+// transaction substrate (the B/C/D grounding discipline).
+//
+// CHECKPOINT E DISCLOSURES (33-41; each disclosed in the checkpoint report):
+//   33. §25 request shape: {rootIntentId, rootTransactionId, targets, policy,
+//       mode, critic, document, evaluationContext?, planningContext?,
+//       substrate}. Structure fields refuse with their STRUCTURE codes
+//       (targets -> INVALID_TARGET, policy -> INVALID_POLICY); the ENGINE
+//       ENVELOPE fields (mode/critic/document/substrate/contexts/ids) refuse
+//       INVALID_SESSION — the request opens the session envelope. The
+//       plain-data scan covers the plain fields only: critic/substrate/
+//       document legitimately carry functions (duck-typed authorities).
+//   34. §24 engine mechanics: the five operations live on a frozen
+//       CorrectionEngine namespace; each is a pure function returning a NEW
+//       SHALLOW-frozen engine state (the injected authorities stay live by
+//       reference — they are the substrate, never canonical records; the
+//       canonical records inside carry the §44 deep-freeze discipline). The
+//       engine owns a session checkpoint (patchEngineSession): the A-era
+//       session APIs deliberately never touched iteration / corrections /
+//       currentEvaluation / bestEvaluation — the engine's whitelist patch
+//       (append-only corrections, monotone iteration, shape-guarded
+//       evaluations) is the ONE sanctioned derivation path, and every patched
+//       session re-validates as §4.
+//   35. §17 operationalization: VERIFIED = every AGENDA target's metric gap
+//       is 0 against the critic's current evaluation (agenda-scoped — the
+//       loop owns its agenda, not the whole document; a document-level PASS
+//       is neither required nor sufficient). NO_PROGRESS = TWO consecutive
+//       iterations whose net state is unchanged (Δ≈0 ⟺ evaluation-
+//       fingerprint equality, the D-2 discipline; a single no-progress
+//       iteration may legitimately retry). OSCILLATION = the gap-aware §31
+//       composition: a fingerprint recurrence with repeatedIndex −
+//       firstIndex >= 2 — ADJACENT recurrence is the streak's evidence, not
+//       oscillation (A→A is no-progress; A→B→A is oscillation).
+//       MAX_ITERATIONS is the budget hard stop. Precedence: VERIFIED >
+//       NO_PROGRESS > OSCILLATION > MAX_ITERATIONS > CONTINUE.
+//   36. §22/§23 consumer-only: the critic contract is the duck-typed
+//       {evaluate(document, evaluationContext) -> EvaluationResult}; the
+//       engine calls it EXACTLY once per evaluation (start + one per consumed
+//       iteration + one confirmation per rollback) with the request's document
+//       and evaluationContext VERBATIM and positional. Critic failures
+//       propagate RAW — never swallowed, never fabricated; returned records
+//       pass the §26/D-era shape guard (the INVALID_ATTEMPT bucket,
+//       disclosure 31's list extended). Convergence and acceptance are
+//       JUDGMENTS OVER the critic's records — the engine contains no
+//       evaluation logic of its own.
+//   37. Choreography: the §3 machine engages only when a correction is
+//       actually attempted (work-then-transition: a phase's work completes,
+//       then the session records it). A pre-verified agenda and a
+//       no-viable-plan start leave the session at IDLE — the ENGINE carries
+//       the verdict (the machine has no IDLE→TERMINATED edge, and forcing the
+//       trail through PLANNING/EXECUTING phases that never happened would
+//       falsify it). Give-ups from positions without a TERMINATED edge ride
+//       the machine's OWN §3 CORRECTION_FAILED route
+//       (EVALUATING→DIAGNOSING→CORRECTING→ROLLING_BACK→TERMINATED) with a
+//       disclosed VACUOUS undo; a REAL §32 undo happens only where something
+//       was pushed (critical regression with policyRollback; manual
+//       rollback). FAILED runtime attempts take the same ROLLING_BACK
+//       disposition (atomic failure = nothing to undo).
+//   38. §26 mode dispatch: a frozen table {cyclesPerRun, requiresApproval,
+//       stepBudget} per mode. AUTO = iterate-to-termination (run()).
+//       GUIDED = one propose/approve cycle per run: the proposal (§42
+//       preview aboard) parks as pendingProposal; iterate(state) without a
+//       directive is a deterministic idempotent WAIT;
+//       iterate(state, {approved:true}) executes the STORED plan (never a
+//       re-derivation); {approved:false} rejects, advances the cursor floor
+//       past it, and re-forms. SINGLE_STEP = one executed attempt per engine
+//       lifetime, then STEPPED (the §17 verdicts — not the mode — decide
+//       termination; further iterates refuse). Directives outside
+//       AWAITING_APPROVAL refuse. lastReport.action is the CALL's terminal
+//       action: 'TERMINATED' whenever the call ends the loop, otherwise the
+//       cycle action (STARTED/PROPOSED/WAITED/APPROVED/PROPOSAL_REJECTED/
+//       ATTEMPT/MANUAL_ROLLBACK).
+//   39. Formation at the evaluation position: focus = the FIRST agenda
+//       target (request order) whose metric gap is non-zero; the working
+//       target REFRESHES observedValue+evidence from the current critic
+//       evaluation (numeric: the max-gap deviation's actual; count-mode: the
+//       match count; identity fields stay agenda-pinned — a refreshed id is
+//       the §44 content rule working, not a new target). The candidate walk
+//       re-ranks every iteration; §33 SKIPs and pre-flight refusals are
+//       formation-time blockers that advance the walk WITHOUT consuming the
+//       iteration. Exhaustion maps the LAST blocker deterministically:
+//       SKIP → NO_PROGRESS; HARD_CONSTRAINT_REJECTED → CONSTRAINT_BLOCKED;
+//       runtime FAILED → EXECUTION_ERROR; NO_CAPABILITY /
+//       INSUFFICIENT_EVIDENCE / OUT_OF_SCOPE / host rejection / pre-flight
+//       refusals → UNFIXABLE.
+//   40. The engine's iteration ledger ({iteration, plan, beforeEvaluation,
+//       afterEvaluation, outcome, attempt}) is the skip/streak/oscillation
+//       source of truth. session.corrections stays the §6 trail with ONE
+//       FINAL stage per attempt (IMPROVED / NO_EFFECT / ROLLED_BACK /
+//       FAILED). Rolled-back ledger entries keep the POST-ATTEMPT
+//       afterEvaluation (the §33 gate must see the attempt's real Δ — a
+//       rolled-back regression is NOT a no-op), while the CONFIRMATION
+//       evaluation (post-undo, through the critic) feeds the streak and
+//       currentEvaluation. The oscillation trail carries post-ATTEMPT
+//       fingerprints only — a rollback restore is the safety design working,
+//       not A→B→A cycling.
+//   41. Content-derived session ids ride the §44 session constructor (the
+//       critic's determinism makes initialEvaluation content-stable); the
+//       engine adds no entropy; canonical engine records stay Date.now()/
+//       uuid-free (the D-20 scan extended to the engine projection).
+//       DISCOVERED CONTRACT GAPS (surfaced, not patched): (a) the LIVE
+//       evaluation.js emits the BARE property 'opacity' where the house
+//       vocabulary is dotted ('appearance.opacity') — under the approved
+//       exact-or-dot-boundary rule a house metric does not match a bare live
+//       property (the agenda checker then reads AT-TARGET: a FALSE-VERIFY
+//       hazard that belongs to host metric choice), and a live-property
+//       metric has no house capability basis (honest UNFIXABLE); the §23
+//       contract is shape-level — metric-vocabulary alignment is the HOST's
+//       adapter responsibility, proven end-to-end by the E-22 adapter beat.
+//       (b) the T11 'dissolve-group' recipe carries OBJECT ids while the
+//       live tool validates GROUP-NODE ids — the loop surfaces the
+//       deterministic runtime refusal as a FAILED attempt and no-progress
+//       evidence (E-7), never a fabricated success.
+
+// CHECKPOINT F SCOPE (this revision adds NO behavior — the verification
+// checkpoint): §59 integration tests A–E, §60 property tests, §61 golden
+// scenario, all proven in tests/correction.test.mjs (F-1..F-13) on the LIVE
+// substrate over the REAL §58 pipeline (Planner -> DSL -> Tool Registry ->
+// Transaction -> Commit -> Critic -> Correction Engine). Every rollback/
+// regression capability the spec names already existed from Checkpoint D
+// (rollbackCorrectionAttempt §32, detectCorrectionRegression §15 — D-8/D-9/
+// D-11/D-19) and every loop/convergence capability from Checkpoint E; the F
+// directive's RED-first clause applies only to MISSING capabilities, and the
+// coverage map found none. F-era disclosures recorded in the test file:
+//   F-42. golden-scenario arrangement: the planner's create intents place the
+//         row (Rule A) and the alignment intent (Rule G) formally states it —
+//         validated, not executed; the critic's per-object requested states
+//         pin the arrangement as spatial.bbox (the numeric anchor the live
+//         authority CAN evaluate; the bare spatial.aligned flag stays
+//         honestly unevaluated, evaluation.js:960-967).
+//   F-43. the host critic adapter (E-22/disclosure 41 precedent at multi-
+//         object scale): per-target liveEvaluate merged through the LIVE
+//         createEvaluationResult into ONE §12 record; the live placement
+//         property bridges to the house metric (mode 'top': bbox.minY ->
+//         position.y — one edge only, or the T05 single-axis delta
+//         double-counts). Every merged record passes the LIVE §12 validator.
+//   F-44. the "Align command" of §61 is the house MoveObject (T05) carrying
+//         the physically-aligning translate; the ENGINE-driven T08 route is
+//         the disclosed capability-table boundary (align-to-axis resolves but
+//         plans refuse INSUFFICIENT_EVIDENCE — T08 is rule-less, disclosure
+//         19). Surfaced as deterministic evidence (F-13 step 5c), never
+//         patched — the approved 39(b) tradition.
+//   F-45. the §22 call accounting extends to the rollback arcs: one
+//         evaluation per consumed iteration PLUS one confirmation per
+//         rollback (calls = 1 + iterations + rollbacks) — the E-10 formula
+//         (iterations + 1) is the rollback-free special case.
+
+// CHECKPOINT G SCOPE (this revision adds NO behavior — the architecture
+// checkpoint): the first COUNTED source scans this module has ever had,
+// embedded in tests/correction.test.mjs (G-1..G-12) per spec §52/§66 and
+// validated pre-embedding by scripts/probe-3.15-checkpointG-scan.mjs (zero
+// false positives on the clean module, positive controls all fire, sanctioned
+// forms clean). The module's behavior is UNCHANGED from the F-pristine; the
+// scans read the source and pin its surface. G-era disclosures recorded in
+// the test file:
+//   G-46. execution-module scan calibration: unlike the read-only 3.14
+//         evaluator/critic, THIS module is the §11/§12 execution engine, so
+//         the directive's "no Transaction.execute / Tool.execute" is
+//         operationalized as RECEIVER-PINNING (allowlists) — tool.execute
+//         only inside the wrapper Command body (disclosure 26),
+//         transactionManager {execute,undo,historyManager}, transactionBuilder
+//         {begin,addCommand,build}, registry {has,get,validate}, wc.* pinned
+//         to the WorkingCopy view, begin-receivers = {transactionBuilder}.
+//         Bare forms with no sanctioned receiver (.write/.insert/.remove/
+//         .update/.commit/.rollback/.register/.unregister/.render/
+//         .invalidate) are banned outright; bare .set(/.delete( are pinned to
+//         the three LOCAL Map bindings (seen/beforeByIdentity/afterByIdentity
+//         — the .push own-collection precedent class).
+//   G-47. the request.document carve-out: §25 sanctions `document` as the
+//         CorrectionLoopRequest's plain-data FIELD (approved disclosure 33);
+//         the scan forbids document in GLOBAL-REACH form (bare identifier)
+//         and carves out the .document property access; both the sanctioned
+//         form (negative control) and the alias form (positive control) are
+//         counted in-test.
+//   G-48. §66 operationalization: no-autonomous-loop = the eight async forms
+//         banned (setInterval/setTimeout/setImmediate/queueMicrotask/
+//         addEventListener/requestAnimationFrame/import(/new Promise);
+//         MAX_ITERATIONS boundedness = static face (exactly ONE while — the
+//         engineRun AUTO loop — region-pinned to policy.maxIterations + the
+//         guard + the §17/§18 throw; SINGLE_STEP stepBudget; no while(true)/
+//         for(;;)/do{) + dynamic face cited (E-18 48-seed, F-10);
+//         HistoryManager = pinned to the single sanctioned READ
+//         (getTransactionToUndo) with the type absent from code; nesting/DAG
+//         = begin-receiver pin + vocabulary absence, invariants cited
+//         dynamically (D-18, F-5/F-11 truncation signature).
+//   G-49. src/core freeze regeneration discipline: the 178-file manifest and
+//         its aggregate (137327739471ff095325854c296a82aa84afde0258b396ad69
+//         02b22de3e21e56) are byte-identical to the 3.14-G generation
+//         snapshot; buffer-hash == utf8-string-hash agreement re-verified at
+//         probe time; the frozen files are never modified for stub-kill
+//         purposes — sensitivity is proven in-test on synthetic trees.
+
+// ---- 1. Error model (house pattern; see disclosure 8) -----------------------
+
+export const CorrectionErrorCodes = Object.freeze({
+  INVALID_SESSION: 'INVALID_SESSION',
+  INVALID_ATTEMPT: 'INVALID_ATTEMPT',
+  INVALID_TARGET: 'INVALID_TARGET',
+  INVALID_DIAGNOSIS: 'INVALID_DIAGNOSIS',
+  INVALID_STRATEGY: 'INVALID_STRATEGY',
+  INVALID_PLAN: 'INVALID_PLAN',
+  INVALID_POLICY: 'INVALID_POLICY',
+  INVALID_TRANSITION: 'INVALID_TRANSITION',
+  INVALID_TERMINATION: 'INVALID_TERMINATION'
+});
+
+export class CorrectionError extends Error {
+  constructor(code, message, details){
+    super(message);
+    this.name = 'CorrectionError';
+    this.code = code;
+    if (details !== undefined) this.details = details;
+  }
+}
+
+function createError(code, message, details){
+  const e = { code, message };
+  if (details !== undefined) e.details = details;
+  return e;
+}
+
+// ---- 2. Shared primitive guards + deterministic canonical form (§44) --------
+// Local copies in the house single-file style (see import contract above);
+// mirrors evaluation.js:80-126 / ai.js:159-166.
+
+function isPlainObject(v){ return v !== null && typeof v === 'object' && !Array.isArray(v); }
+function isFiniteNumber(v){ return typeof v === 'number' && Number.isFinite(v); }
+function isNonEmptyString(v){ return typeof v === 'string' && v.length > 0; }
+function isInteger(v){ return isFiniteNumber(v) && Number.isInteger(v); }
+
+// Depth-first scan: returns the path of the first function value, or null.
+// Every structure is plain data — correction records are inert (§26 spirit:
+// proposals are never commands; correction records are never callbacks).
+function findFunctionPath(value, path){
+  if (typeof value === 'function') return path || '(root)';
+  if (Array.isArray(value)){
+    for (let i = 0; i < value.length; i++){
+      const hit = findFunctionPath(value[i], `${path}[${i}]`);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (isPlainObject(value)){
+    for (const k of Object.keys(value)){
+      const hit = findFunctionPath(value[k], `${path}.${k}`);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+function deepFreeze(value){
+  if (isPlainObject(value) || Array.isArray(value)){
+    for (const k of Object.keys(value)) deepFreeze(value[k]);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+// Deep plain-data copy via canonical JSON: strips undefined-valued optionals
+// deterministically and severs aliasing with caller-held objects (house
+// pattern: ai.js createPlanningContext, evaluation.js snapshot inputs).
+function plainCopy(value){
+  return JSON.parse(JSON.stringify(value));
+}
+
+// Key-sorted serialization: identical logical content always yields an
+// identical string, independent of property insertion order (§44).
+function stableStringify(value){
+  if (value === undefined) return 'undefined';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (isPlainObject(value)){
+    const keys = Object.keys(value).sort();
+    return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+// FNV-1a, 32 bit. Pure integer arithmetic, no entropy, stable across engines
+// (mirrors ai.js:159-166 / evaluation.js:122-131 — the §16/§44 discipline).
+function fnv1a32(str){
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++){
+    h ^= str.charCodeAt(i);
+    h = (h + ((h << 1) >>> 0) + ((h << 4) >>> 0) + ((h << 7) >>> 0) + ((h << 8) >>> 0) + ((h << 24) >>> 0)) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+function contentId(prefix, content){
+  return prefix + fnv1a32(stableStringify(content));
+}
+
+function confidenceErrors(value, label, errors, code, { strictlyPositive = false } = {}){
+  if (!isFiniteNumber(value) || value < 0 || value > 1){
+    errors.push(createError(code, `${label} must be a finite number in [0,1]`, { field: label, value }));
+  } else if (strictlyPositive && value === 0){
+    errors.push(createError(code, `${label} must be strictly positive (a zero-confidence strategy can never be ranked, §19)`, { field: label, value }));
+  }
+}
+
+function plainObjectArrayErrors(value, label, errors, code, { allowEmpty = false, minItems = null } = {}){
+  if (!Array.isArray(value)){
+    errors.push(createError(code, `${label} must be an array`, { field: label }));
+    return;
+  }
+  if (!allowEmpty && value.length === 0){
+    errors.push(createError(code, `${label} must not be empty`, { field: label }));
+    return;
+  }
+  if (isFiniteNumber(minItems) && value.length < minItems){
+    errors.push(createError(code, `${label} must have at least ${minItems} entries`, { field: label }));
+  }
+  for (let i = 0; i < value.length; i++){
+    if (!isPlainObject(value[i])){
+      errors.push(createError(code, `${label}[${i}] must be a plain object`, { field: `${label}[${i}]` }));
+    }
+  }
+}
+
+// ---- 3. Vocabularies (spec §5, §50, §6, §7, §8, §9/§15) ---------------------
+
+export const CORRECTION_LOOP_STATES = Object.freeze([
+  'IDLE', 'PLANNING', 'EXECUTING', 'EVALUATING', 'DIAGNOSING', 'CORRECTING',
+  'RE_EXECUTING', 'RE_EVALUATING', 'VERIFIED', 'ROLLING_BACK', 'TERMINATED'
+]);
+
+export const CORRECTION_TERMINATION_REASONS = Object.freeze([
+  'VERIFIED', 'MAX_ITERATIONS_REACHED', 'NO_PROGRESS', 'OSCILLATION_DETECTED',
+  'UNFIXABLE', 'EXECUTION_ERROR', 'CONSTRAINT_BLOCKED', 'SEMANTIC_BLOCKED',
+  'USER_CANCELLED'
+]);
+
+export const CORRECTION_ATTEMPT_STATUSES = Object.freeze([
+  'PROPOSED', 'EXECUTED', 'IMPROVED', 'REGRESSED', 'NO_EFFECT', 'FAILED', 'ROLLED_BACK'
+]);
+
+export const CORRECTION_TARGET_CATEGORIES = Object.freeze([
+  'GEOMETRY', 'ALIGNMENT', 'SPACING', 'SYMMETRY', 'SIZE', 'POSITION',
+  'APPEARANCE', 'SEMANTIC', 'CONSTRAINT', 'TEXT', 'STRUCTURE'
+]);
+
+export const CORRECTION_SEVERITIES = Object.freeze(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
+
+export const CORRECTION_DIAGNOSIS_ROOT_CAUSES = Object.freeze([
+  'POSITION_ERROR', 'SIZE_ERROR', 'TRANSFORM_ERROR', 'SPACING_ERROR',
+  'ALIGNMENT_ERROR', 'STYLE_ERROR', 'STRUCTURAL_ERROR', 'SEMANTIC_ERROR',
+  'CONSTRAINT_VIOLATION', 'UNKNOWN'
+]);
+
+export const CORRECTION_STRATEGY_RISKS = Object.freeze(['LOW', 'MEDIUM', 'HIGH']);
+
+// ---- 4. CorrectionLoopPolicy (spec §18) -------------------------------------
+// The §18 values are implementation defaults, NOT claims about standard tools
+// (§18: "implementation defaults").
+
+const POLICY_DEFAULTS = Object.freeze({
+  maxIterations: 5,
+  maxCorrectionsPerIteration: 3,
+  minimumImprovement: 0.01,
+  maximumRegression: 0.05,
+  allowOscillationRecovery: false,
+  preserveBestState: true,
+  rollbackOnCriticalRegression: true
+});
+
+export function createCorrectionLoopPolicy(overrides){
+  const src = overrides === undefined ? {} : plainCopy(overrides);
+  if (!isPlainObject(src)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_POLICY, 'createCorrectionLoopPolicy requires a plain-object overrides record (or undefined)');
+  }
+  const fnPath = findFunctionPath(src, 'policy');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_POLICY, `policy overrides must be plain data; function value at ${fnPath}`);
+  return deepFreeze({ ...POLICY_DEFAULTS, ...src });
+}
+
+export function validateCorrectionLoopPolicy(policy){
+  const errors = [];
+  if (!isPlainObject(policy)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_POLICY, 'CorrectionLoopPolicy must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(policy, 'policy');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_POLICY, `policy must be plain data; function value at ${fnPath}`)] };
+  for (const key of Object.keys(POLICY_DEFAULTS)){
+    if (!Object.prototype.hasOwnProperty.call(policy, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, `policy.${key} is a mandatory §18 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isInteger(policy.maxIterations) || policy.maxIterations < 1){
+    errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, 'policy.maxIterations must be an integer >= 1 (§18 loop safety)', { value: policy.maxIterations }));
+  }
+  if (!isInteger(policy.maxCorrectionsPerIteration) || policy.maxCorrectionsPerIteration < 1){
+    errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, 'policy.maxCorrectionsPerIteration must be an integer >= 1 (§18)', { value: policy.maxCorrectionsPerIteration }));
+  }
+  if (!isFiniteNumber(policy.minimumImprovement) || policy.minimumImprovement < 0){
+    errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, 'policy.minimumImprovement must be a finite number >= 0 (§18)', { value: policy.minimumImprovement }));
+  }
+  if (!isFiniteNumber(policy.maximumRegression) || policy.maximumRegression < 0){
+    errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, 'policy.maximumRegression must be a finite number >= 0 (§18)', { value: policy.maximumRegression }));
+  }
+  for (const b of ['allowOscillationRecovery', 'preserveBestState', 'rollbackOnCriticalRegression']){
+    if (typeof policy[b] !== 'boolean'){
+      errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, `policy.${b} must be a boolean (§18)`, { field: b, value: policy[b] }));
+    }
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 5. CorrectionTarget (spec §7) ------------------------------------------
+// The Critic does not produce commands; a failure first becomes a TARGET
+// (§7): what is wrong, on which objects, by how much, with evidence.
+
+const TARGET_CONTENT_KEYS = Object.freeze(['category', 'objectIds', 'metric', 'observedValue', 'severity', 'confidence', 'evidence']);
+
+export function createCorrectionTarget(content){
+  if (!isPlainObject(content)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'createCorrectionTarget requires a plain-object content record');
+  }
+  const fnPath = findFunctionPath(content, 'content');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, `target content must be plain data; function value at ${fnPath}`);
+  for (const required of TARGET_CONTENT_KEYS){
+    if (!Object.prototype.hasOwnProperty.call(content, required) || content[required] === undefined){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, `createCorrectionTarget requires '${required}' explicitly (deterministic construction, no hidden defaults)`, { field: required });
+    }
+  }
+  const t = plainCopy(content);
+  const errors = [];
+  targetFieldErrors(t, errors);
+  if (errors.length > 0) throw new CorrectionError(errors[0].code, errors[0].message, errors);
+  if (t.targetValue !== undefined && !isFiniteNumber(t.targetValue)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'target.targetValue must be undefined or a finite number (§7)', { value: t.targetValue });
+  }
+  return deepFreeze({ id: contentId('ctarget-', t), ...t });
+}
+
+function targetFieldErrors(t, errors){
+  if (!CORRECTION_TARGET_CATEGORIES.includes(t.category)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, `target.category must be one of the §7 categories`, { value: t.category }));
+  }
+  if (!Array.isArray(t.objectIds) || t.objectIds.length === 0 || !t.objectIds.every(isNonEmptyString)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, 'target.objectIds must be a non-empty array of non-empty strings (§7)'));
+  }
+  if (!isNonEmptyString(t.metric)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, 'target.metric must be a non-empty string (§7)'));
+  }
+  if (!isFiniteNumber(t.observedValue)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, 'target.observedValue must be a finite number (§7)', { value: t.observedValue }));
+  }
+  if (!CORRECTION_SEVERITIES.includes(t.severity)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, 'target.severity must be LOW|MEDIUM|HIGH|CRITICAL (§7)', { value: t.severity }));
+  }
+  confidenceErrors(t.confidence, 'target.confidence', errors, CorrectionErrorCodes.INVALID_TARGET);
+  plainObjectArrayErrors(t.evidence, 'target.evidence', errors, CorrectionErrorCodes.INVALID_TARGET);
+}
+
+export function validateCorrectionTarget(target){
+  const errors = [];
+  if (!isPlainObject(target)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_TARGET, 'CorrectionTarget must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(target, 'target');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_TARGET, `target must be plain data; function value at ${fnPath}`)] };
+  for (const key of ['id', ...TARGET_CONTENT_KEYS]){
+    if (!Object.prototype.hasOwnProperty.call(target, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, `target.${key} is a mandatory §7 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isNonEmptyString(target.id)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, 'target.id must be a non-empty string (content-derived, §44)'));
+  }
+  targetFieldErrors(target, errors);
+  if (target.targetValue !== undefined && !isFiniteNumber(target.targetValue)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, 'target.targetValue must be undefined or a finite number (§7)'));
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 6. CorrectionDiagnosis (spec §8) ---------------------------------------
+// EvaluationResult says WHAT is bad; Diagnosis says WHY it is probably bad
+// (§8). It never executes and never mutates — it recommends.
+
+const DIAGNOSIS_CONTENT_KEYS = Object.freeze(['targetId', 'rootCause', 'confidence', 'affectedObjects', 'recommendedStrategies']);
+
+export function createCorrectionDiagnosis(content){
+  if (!isPlainObject(content)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'createCorrectionDiagnosis requires a plain-object content record');
+  }
+  const fnPath = findFunctionPath(content, 'content');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_DIAGNOSIS, `diagnosis content must be plain data; function value at ${fnPath}`);
+  for (const required of DIAGNOSIS_CONTENT_KEYS){
+    if (!Object.prototype.hasOwnProperty.call(content, required) || content[required] === undefined){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_DIAGNOSIS, `createCorrectionDiagnosis requires '${required}' explicitly (deterministic construction, no hidden defaults)`, { field: required });
+    }
+  }
+  const d = plainCopy(content);
+  const errors = [];
+  diagnosisFieldErrors(d, errors);
+  if (errors.length > 0) throw new CorrectionError(errors[0].code, errors[0].message, errors);
+  return deepFreeze({ id: contentId('diag-', d), ...d });
+}
+
+function diagnosisFieldErrors(d, errors){
+  if (!isNonEmptyString(d.targetId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'diagnosis.targetId must be a non-empty string naming a CorrectionTarget (§8)'));
+  }
+  if (!CORRECTION_DIAGNOSIS_ROOT_CAUSES.includes(d.rootCause)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'diagnosis.rootCause must be one of the §8 root causes', { value: d.rootCause }));
+  }
+  confidenceErrors(d.confidence, 'diagnosis.confidence', errors, CorrectionErrorCodes.INVALID_DIAGNOSIS);
+  if (!Array.isArray(d.affectedObjects) || d.affectedObjects.length === 0 || !d.affectedObjects.every(isNonEmptyString)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'diagnosis.affectedObjects must be a non-empty array of non-empty strings (§8)'));
+  }
+  plainObjectArrayErrors(d.recommendedStrategies, 'diagnosis.recommendedStrategies', errors, CorrectionErrorCodes.INVALID_DIAGNOSIS);
+}
+
+export function validateCorrectionDiagnosis(diagnosis){
+  const errors = [];
+  if (!isPlainObject(diagnosis)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'CorrectionDiagnosis must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(diagnosis, 'diagnosis');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, `diagnosis must be plain data; function value at ${fnPath}`)] };
+  for (const key of ['id', ...DIAGNOSIS_CONTENT_KEYS]){
+    if (!Object.prototype.hasOwnProperty.call(diagnosis, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, `diagnosis.${key} is a mandatory §8 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isNonEmptyString(diagnosis.id)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'diagnosis.id must be a non-empty string (content-derived, §44)'));
+  }
+  diagnosisFieldErrors(diagnosis, errors);
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 7. CorrectionStrategy (spec §9) ----------------------------------------
+// A named, risk-rated, reversible-when-possible correction recipe. Commands
+// are DESCRIPTORS (plain data) — the command objects themselves are built by
+// the execution checkpoints through the Command architecture (§11); a
+// strategy never carries functions (see the plain-data scan).
+
+const STRATEGY_CONTENT_KEYS = Object.freeze(['name', 'applicableTo', 'commands', 'expectedEffect', 'risk', 'reversible', 'confidence']);
+
+export function createCorrectionStrategy(content){
+  if (!isPlainObject(content)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, 'createCorrectionStrategy requires a plain-object content record');
+  }
+  const fnPath = findFunctionPath(content, 'content');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, `strategy content must be plain data; function value at ${fnPath}`);
+  for (const required of STRATEGY_CONTENT_KEYS){
+    if (!Object.prototype.hasOwnProperty.call(content, required) || content[required] === undefined){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, `createCorrectionStrategy requires '${required}' explicitly (deterministic construction, no hidden defaults)`, { field: required });
+    }
+  }
+  const s = plainCopy(content);
+  const errors = [];
+  strategyFieldErrors(s, errors);
+  if (errors.length > 0) throw new CorrectionError(errors[0].code, errors[0].message, errors);
+  return deepFreeze({ id: contentId('strategy-', s), ...s });
+}
+
+function strategyFieldErrors(s, errors){
+  if (!isNonEmptyString(s.name)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, 'strategy.name must be a non-empty string (§9)'));
+  }
+  if (!Array.isArray(s.applicableTo) || s.applicableTo.length === 0 || !s.applicableTo.every(isNonEmptyString)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, 'strategy.applicableTo must be a non-empty array of non-empty strings (§9)'));
+  }
+  plainObjectArrayErrors(s.commands, 'strategy.commands', errors, CorrectionErrorCodes.INVALID_STRATEGY);
+  if (!isPlainObject(s.expectedEffect)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, 'strategy.expectedEffect must be a plain object (§9)'));
+  }
+  if (!CORRECTION_STRATEGY_RISKS.includes(s.risk)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, 'strategy.risk must be LOW|MEDIUM|HIGH (§9)', { value: s.risk }));
+  }
+  if (typeof s.reversible !== 'boolean'){
+    errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, 'strategy.reversible must be a boolean (§9)'));
+  }
+  // Strictly positive: a zero-confidence strategy can never be ranked (§19) —
+  // disclosure 7 in the module header.
+  confidenceErrors(s.confidence, 'strategy.confidence', errors, CorrectionErrorCodes.INVALID_STRATEGY, { strictlyPositive: true });
+}
+
+export function validateCorrectionStrategy(strategy){
+  const errors = [];
+  if (!isPlainObject(strategy)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_STRATEGY, 'CorrectionStrategy must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(strategy, 'strategy');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_STRATEGY, `strategy must be plain data; function value at ${fnPath}`)] };
+  for (const key of ['id', ...STRATEGY_CONTENT_KEYS]){
+    if (!Object.prototype.hasOwnProperty.call(strategy, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, `strategy.${key} is a mandatory §9 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isNonEmptyString(strategy.id)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, 'strategy.id must be a non-empty string (content-derived, §44)'));
+  }
+  strategyFieldErrors(strategy, errors);
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 8. CorrectionPlan (spec §10) -------------------------------------------
+// The executable correction proposal: session-bound, diagnosis-backed,
+// strategy-typed, with explicit pre/postconditions. Still plain data — the
+// Transaction integration (§11/§12) happens in the execution checkpoints.
+
+const PLAN_CONTENT_KEYS = Object.freeze(['sessionId', 'diagnosis', 'strategy', 'commands', 'expectedImprovement', 'riskAssessment', 'preconditions', 'postconditions']);
+
+export function createCorrectionPlan(content){
+  if (!isPlainObject(content)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'createCorrectionPlan requires a plain-object content record');
+  }
+  const fnPath = findFunctionPath(content, 'content');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, `plan content must be plain data; function value at ${fnPath}`);
+  for (const required of PLAN_CONTENT_KEYS){
+    if (!Object.prototype.hasOwnProperty.call(content, required) || content[required] === undefined){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, `createCorrectionPlan requires '${required}' explicitly (deterministic construction, no hidden defaults)`, { field: required });
+    }
+  }
+  const p = plainCopy(content);
+  const errors = [];
+  if (!isNonEmptyString(p.sessionId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.sessionId must be a non-empty string naming the owning CorrectionLoopSession (§10)'));
+  }
+  if (!isPlainObject(p.diagnosis) || !validateCorrectionDiagnosis(p.diagnosis).valid){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.diagnosis must be a valid CorrectionDiagnosis (§8/§10)'));
+  }
+  if (!isPlainObject(p.strategy) || !validateCorrectionStrategy(p.strategy).valid){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.strategy must be a valid CorrectionStrategy (§9/§10)'));
+  }
+  plainObjectArrayErrors(p.commands, 'plan.commands', errors, CorrectionErrorCodes.INVALID_PLAN);
+  if (!isPlainObject(p.expectedImprovement)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.expectedImprovement must be a plain object (§10)'));
+  }
+  if (!isPlainObject(p.riskAssessment)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.riskAssessment must be a plain object (§10)'));
+  }
+  plainObjectArrayErrors(p.preconditions, 'plan.preconditions', errors, CorrectionErrorCodes.INVALID_PLAN, { allowEmpty: true });
+  plainObjectArrayErrors(p.postconditions, 'plan.postconditions', errors, CorrectionErrorCodes.INVALID_PLAN, { allowEmpty: true });
+  if (errors.length > 0) throw new CorrectionError(errors[0].code, errors[0].message, errors);
+  return deepFreeze({ id: contentId('cplan-', p), ...p });
+}
+
+export function validateCorrectionPlan(plan){
+  const errors = [];
+  if (!isPlainObject(plan)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_PLAN, 'CorrectionPlan must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(plan, 'plan');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_PLAN, `plan must be plain data; function value at ${fnPath}`)] };
+  for (const key of ['id', ...PLAN_CONTENT_KEYS]){
+    if (!Object.prototype.hasOwnProperty.call(plan, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, `plan.${key} is a mandatory §10 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isNonEmptyString(plan.id)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.id must be a non-empty string (content-derived, §44)'));
+  }
+  if (!isNonEmptyString(plan.sessionId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.sessionId must be a non-empty string naming the owning CorrectionLoopSession (§10)'));
+  }
+  if (!isPlainObject(plan.diagnosis) || !validateCorrectionDiagnosis(plan.diagnosis).valid){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.diagnosis must be a valid CorrectionDiagnosis (§8/§10)'));
+  }
+  if (!isPlainObject(plan.strategy) || !validateCorrectionStrategy(plan.strategy).valid){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.strategy must be a valid CorrectionStrategy (§9/§10)'));
+  }
+  plainObjectArrayErrors(plan.commands, 'plan.commands', errors, CorrectionErrorCodes.INVALID_PLAN);
+  if (!isPlainObject(plan.expectedImprovement)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.expectedImprovement must be a plain object (§10)'));
+  }
+  if (!isPlainObject(plan.riskAssessment)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.riskAssessment must be a plain object (§10)'));
+  }
+  plainObjectArrayErrors(plan.preconditions, 'plan.preconditions', errors, CorrectionErrorCodes.INVALID_PLAN, { allowEmpty: true });
+  plainObjectArrayErrors(plan.postconditions, 'plan.postconditions', errors, CorrectionErrorCodes.INVALID_PLAN, { allowEmpty: true });
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 9. CorrectionAttempt (spec §6) -----------------------------------------
+// One independent, auditable correction try: its own target, its own plan,
+// its own transaction (§6/§12 — the transaction itself is wired by the
+// execution checkpoints through the EXISTING transaction.js API).
+
+const ATTEMPT_CONTENT_KEYS = Object.freeze(['iteration', 'target', 'plan', 'transactionId', 'beforeEvaluation', 'status']);
+
+export function createCorrectionAttempt(content){
+  if (!isPlainObject(content)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'createCorrectionAttempt requires a plain-object content record');
+  }
+  const fnPath = findFunctionPath(content, 'content');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, `attempt content must be plain data; function value at ${fnPath}`);
+  for (const required of ATTEMPT_CONTENT_KEYS){
+    if (!Object.prototype.hasOwnProperty.call(content, required) || content[required] === undefined){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, `createCorrectionAttempt requires '${required}' explicitly (deterministic construction, no hidden defaults)`, { field: required });
+    }
+  }
+  const a = plainCopy(content);
+  const errors = [];
+  attemptFieldErrors(a, errors);
+  if (errors.length > 0) throw new CorrectionError(errors[0].code, errors[0].message, errors);
+  if (a.afterEvaluation !== undefined && (!isPlainObject(a.afterEvaluation) || findFunctionPath(a.afterEvaluation, 'afterEvaluation'))){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.afterEvaluation must be undefined or a plain-data record (§6)');
+  }
+  if (a.delta !== undefined && (!isPlainObject(a.delta) || findFunctionPath(a.delta, 'delta'))){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.delta must be undefined or a plain-data EvaluationDelta record (§6/§13)');
+  }
+  return deepFreeze({ id: contentId('attempt-', a), ...a });
+}
+
+function attemptFieldErrors(a, errors){
+  if (!isInteger(a.iteration) || a.iteration < 0){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.iteration must be an integer >= 0 (§6)'));
+  }
+  if (!isPlainObject(a.target) || !validateCorrectionTarget(a.target).valid){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.target must be a valid CorrectionTarget (§7/§6)'));
+  }
+  if (!isPlainObject(a.plan) || !validateCorrectionPlan(a.plan).valid){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.plan must be a valid CorrectionPlan (§10/§6)'));
+  }
+  if (!isNonEmptyString(a.transactionId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.transactionId must be a non-empty string naming the attempt\'s INDEPENDENT transaction (§6/§12)'));
+  }
+  if (!isPlainObject(a.beforeEvaluation) || findFunctionPath(a.beforeEvaluation, 'beforeEvaluation')){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.beforeEvaluation must be a plain-data evaluation record (§6)'));
+  }
+  if (!CORRECTION_ATTEMPT_STATUSES.includes(a.status)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.status must be one of the §6 statuses', { value: a.status }));
+  }
+}
+
+export function validateCorrectionAttempt(attempt){
+  const errors = [];
+  if (!isPlainObject(attempt)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'CorrectionAttempt must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(attempt, 'attempt');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_ATTEMPT, `attempt must be plain data; function value at ${fnPath}`)] };
+  for (const key of ['id', ...ATTEMPT_CONTENT_KEYS]){
+    if (!Object.prototype.hasOwnProperty.call(attempt, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, `attempt.${key} is a mandatory §6 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isNonEmptyString(attempt.id)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.id must be a non-empty string (content-derived, §44)'));
+  }
+  attemptFieldErrors(attempt, errors);
+  if (attempt.afterEvaluation !== undefined && (!isPlainObject(attempt.afterEvaluation) || findFunctionPath(attempt.afterEvaluation, 'afterEvaluation'))){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.afterEvaluation must be undefined or a plain-data record (§6)'));
+  }
+  if (attempt.delta !== undefined && (!isPlainObject(attempt.delta) || findFunctionPath(attempt.delta, 'delta'))){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.delta must be undefined or a plain-data EvaluationDelta record (§6/§13)'));
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 10. CorrectionLoopSession (spec §4/§12) --------------------------------
+// Session-local iteration metadata. The canonical HistoryManager remains
+// LINEAR (invariant 13, §12/§47): the session NEVER changes history
+// topology — it only carries the iteration trail.
+
+const SESSION_CONTENT_KEYS = Object.freeze(['rootIntentId', 'rootTransactionId', 'maxIterations', 'initialEvaluation']);
+
+export function createCorrectionLoopSession(content){
+  if (!isPlainObject(content)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, 'createCorrectionLoopSession requires a plain-object content record');
+  }
+  const fnPath = findFunctionPath(content, 'content');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, `session content must be plain data; function value at ${fnPath}`);
+  for (const required of SESSION_CONTENT_KEYS){
+    if (!Object.prototype.hasOwnProperty.call(content, required) || content[required] === undefined){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, `createCorrectionLoopSession requires '${required}' explicitly (deterministic construction, no hidden defaults)`, { field: required });
+    }
+  }
+  const src = plainCopy(content);
+  const errors = [];
+  if (!isNonEmptyString(src.rootIntentId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.rootIntentId must be a non-empty string (§4)'));
+  }
+  if (!isNonEmptyString(src.rootTransactionId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.rootTransactionId must be a non-empty string (§4; the §12 prose calls it parentTransactionId — see module header disclosure 1)'));
+  }
+  if (!isInteger(src.maxIterations) || src.maxIterations < 1){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.maxIterations must be an integer >= 1 (§4/§18 loop safety)'));
+  }
+  if (!isPlainObject(src.initialEvaluation) || findFunctionPath(src.initialEvaluation, 'initialEvaluation')){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.initialEvaluation must be a plain-data evaluation record (§4)'));
+  }
+  if (src.currentEvaluation !== undefined && (!isPlainObject(src.currentEvaluation) || findFunctionPath(src.currentEvaluation, 'currentEvaluation'))){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.currentEvaluation must be undefined (defaults to initialEvaluation) or a plain-data evaluation record (§4)'));
+  }
+  if (errors.length > 0) throw new CorrectionError(errors[0].code, errors[0].message, errors);
+  const initialEvaluation = src.initialEvaluation;
+  const session = {
+    id: null, // hashed over the INITIAL content below; identity is transition-invariant
+    rootIntentId: src.rootIntentId,
+    rootTransactionId: src.rootTransactionId,
+    iteration: 0,
+    maxIterations: src.maxIterations,
+    state: 'IDLE',
+    initialEvaluation,
+    currentEvaluation: src.currentEvaluation !== undefined ? src.currentEvaluation : initialEvaluation,
+    bestEvaluation: undefined,
+    corrections: [],
+    visitedStates: ['IDLE'],
+    terminationReason: undefined
+  };
+  session.id = contentId('loop-', {
+    rootIntentId: session.rootIntentId,
+    rootTransactionId: session.rootTransactionId,
+    maxIterations: session.maxIterations,
+    initialEvaluation: session.initialEvaluation
+  });
+  return deepFreeze(session);
+}
+
+export function validateCorrectionLoopSession(session){
+  const errors = [];
+  if (!isPlainObject(session)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_SESSION, 'CorrectionLoopSession must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(session, 'session');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_SESSION, `session must be plain data; function value at ${fnPath}`)] };
+  for (const key of ['id', 'rootIntentId', 'rootTransactionId', 'iteration', 'maxIterations', 'state', 'initialEvaluation', 'currentEvaluation', 'corrections', 'visitedStates']){
+    if (!Object.prototype.hasOwnProperty.call(session, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, `session.${key} is a mandatory §4 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isNonEmptyString(session.id)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.id must be a non-empty string (content-derived, §44)'));
+  }
+  if (!isNonEmptyString(session.rootIntentId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.rootIntentId must be a non-empty string (§4)'));
+  }
+  if (!isNonEmptyString(session.rootTransactionId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.rootTransactionId must be a non-empty string (§4)'));
+  }
+  if (!isInteger(session.iteration) || session.iteration < 0){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.iteration must be an integer >= 0 (§4)'));
+  }
+  if (!isInteger(session.maxIterations) || session.maxIterations < 1){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.maxIterations must be an integer >= 1 (§4/§18)'));
+  }
+  if (!CORRECTION_LOOP_STATES.includes(session.state)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.state must be a §5 CorrectionLoopState', { value: session.state }));
+  }
+  if (!isPlainObject(session.initialEvaluation) || findFunctionPath(session.initialEvaluation, 'initialEvaluation')){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.initialEvaluation must be a plain-data evaluation record (§4)'));
+  }
+  if (!isPlainObject(session.currentEvaluation) || findFunctionPath(session.currentEvaluation, 'currentEvaluation')){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.currentEvaluation must be a plain-data evaluation record (§4)'));
+  }
+  if (session.bestEvaluation !== undefined && (!isPlainObject(session.bestEvaluation) || findFunctionPath(session.bestEvaluation, 'bestEvaluation'))){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.bestEvaluation must be undefined or a plain-data evaluation record (§4/§16)'));
+  }
+  if (!Array.isArray(session.corrections)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.corrections must be an array of CorrectionAttempt records (§4/§6)'));
+  } else {
+    for (let i = 0; i < session.corrections.length; i++){
+      const check = validateCorrectionAttempt(session.corrections[i]);
+      if (!check.valid){
+        for (const e of check.errors) errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, `session.corrections[${i}]: ${e.message}`, e.details));
+      }
+    }
+  }
+  if (!Array.isArray(session.visitedStates) || session.visitedStates.length === 0 || !session.visitedStates.every(s => CORRECTION_LOOP_STATES.includes(s))){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.visitedStates must be a non-empty array of §5 state names (§4)'));
+  } else if (session.visitedStates[0] !== 'IDLE'){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.visitedStates must open with IDLE (§3: the loop starts at IDLE)'));
+  }
+  if (session.terminationReason !== undefined && !CORRECTION_TERMINATION_REASONS.includes(session.terminationReason)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.terminationReason must be undefined or a §50 CorrectionTerminationReason', { value: session.terminationReason }));
+  }
+  // Termination discipline (module-header disclosure 5): state TERMINATED
+  // IFF a §50 reason is carried — enforced in BOTH directions (the §12
+  // gate-5 discipline of evaluation.js applied to the loop lifecycle).
+  const terminated = session.state === 'TERMINATED';
+  const hasReason = session.terminationReason !== undefined;
+  if (terminated && !hasReason){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.state TERMINATED requires a §50 terminationReason — terminate through terminateSession(session, reason)'));
+  }
+  if (!terminated && hasReason){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.terminationReason requires state TERMINATED (§4/§50)'));
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 11. State machine (spec §3/§5) -----------------------------------------
+// The §3 graph over §5 state names (module-header disclosures 2-4). Every
+// edge below is either a literal §3 edge or one of the five disclosed
+// spec-derived completion edges. TERMINATED is absorbing.
+
+export const CORRECTION_LOOP_TRANSITIONS = Object.freeze({
+  IDLE:          Object.freeze(['PLANNING']),
+  PLANNING:      Object.freeze(['EXECUTING']),
+  EXECUTING:     Object.freeze(['EVALUATING']),
+  EVALUATING:    Object.freeze(['DIAGNOSING', 'VERIFIED']),                    // DIAGNOSING = §3 (UNRESOLVED); VERIFIED = §17 clean pass
+  DIAGNOSING:    Object.freeze(['CORRECTING']),
+  CORRECTING:    Object.freeze(['RE_EXECUTING', 'ROLLING_BACK']),              // ROLLING_BACK = §3 (CORRECTION_FAILED)
+  RE_EXECUTING:  Object.freeze(['RE_EVALUATING']),
+  RE_EVALUATING: Object.freeze(['VERIFIED', 'ROLLING_BACK', 'TERMINATED', 'DIAGNOSING']), // §3 (VERIFIED / REGRESSION / NO_PROGRESS) + cycle
+  ROLLING_BACK:  Object.freeze(['DIAGNOSING', 'TERMINATED']),                  // §69 retry + §50 give-up
+  VERIFIED:      Object.freeze(['TERMINATED']),                                // §4/§50 formal close
+  TERMINATED:    Object.freeze([])
+});
+
+// [CHECKPOINT-A-KILLSITE-1] transition legality lookup
+export function canTransition(from, to){
+  const allowed = CORRECTION_LOOP_TRANSITIONS[from] || [];
+  return allowed.includes(to);
+}
+
+// [CHECKPOINT-A-KILLSITE-2] visitedStates append
+export function transitionSession(session, to){
+  const check = validateCorrectionLoopSession(session);
+  if (!check.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, 'transitionSession requires a valid CorrectionLoopSession (§4)', check.errors);
+  }
+  if (!isNonEmptyString(to) || !CORRECTION_LOOP_STATES.includes(to)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, `transitionSession target must be a §5 CorrectionLoopState, got ${JSON.stringify(to)}`, { target: to });
+  }
+  if (to === 'TERMINATED'){
+    // Module-header disclosure 5: the reasonless direct jump is refused even
+    // where the §3 edge exists — a TERMINATED session MUST carry its §50
+    // reason, so the sanctioned path is terminateSession(session, reason).
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TERMINATION, 'direct transition to TERMINATED is refused: a §50 terminationReason is mandatory — use terminateSession(session, reason)', { from: session.state });
+  }
+  if (!canTransition(session.state, to)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, `illegal state transition ${session.state} -> ${to} (§3/§5): the Correction Loop state machine refuses shortcuts, backwards jumps, and skipped phases`, { from: session.state, to });
+  }
+  const nextTrail = Object.freeze([...session.visitedStates, to]);
+  return deepFreeze({ ...session, state: to, visitedStates: [...nextTrail] });
+}
+
+// [CHECKPOINT-A-KILLSITE-3] termination reason discipline
+export function terminateSession(session, reason){
+  const check = validateCorrectionLoopSession(session);
+  if (!check.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, 'terminateSession requires a valid CorrectionLoopSession (§4)', check.errors);
+  }
+  if (session.state === 'TERMINATED'){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'terminateSession: the session is already TERMINATED (absorbing state, §5)', { from: session.state });
+  }
+  if (!isNonEmptyString(reason) || !CORRECTION_TERMINATION_REASONS.includes(reason)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TERMINATION, `terminateSession reason must be a §50 CorrectionTerminationReason, got ${JSON.stringify(reason)}`, { reason });
+  }
+  // §53 user-cancellation overlay (module-header disclosure 4): the USER may
+  // cancel at ANY iteration — USER_CANCELLED is legal from every
+  // non-terminated state. Every OTHER §50 reason is engine-driven and still
+  // requires a §3/§5 map edge into TERMINATED.
+  if (reason !== 'USER_CANCELLED' && !canTransition(session.state, 'TERMINATED')){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, `termination with reason ${reason} is illegal from state ${session.state} (§3): no engine-driven edge into TERMINATED`, { from: session.state, reason });
+  }
+  const nextTrail = Object.freeze([...session.visitedStates, 'TERMINATED']);
+  return deepFreeze({ ...session, state: 'TERMINATED', terminationReason: reason, visitedStates: [...nextTrail] });
+}
+
+// ---- 12. Checkpoint B — category→rootCause attribution (§7→§8, disclosure 11)
+
+export const CATEGORY_TO_ROOT_CAUSE = deepFreeze({
+  GEOMETRY: 'TRANSFORM_ERROR',      // shape-level geometry errors are transform errors
+  ALIGNMENT: 'ALIGNMENT_ERROR',
+  SPACING: 'SPACING_ERROR',
+  SYMMETRY: 'ALIGNMENT_ERROR',      // symmetry deviation = relational-placement error (disclosure 11)
+  SIZE: 'SIZE_ERROR',
+  POSITION: 'POSITION_ERROR',
+  APPEARANCE: 'STYLE_ERROR',
+  SEMANTIC: 'SEMANTIC_ERROR',
+  CONSTRAINT: 'CONSTRAINT_VIOLATION',
+  TEXT: 'SEMANTIC_ERROR',           // text content is document semantics (disclosure 11)
+  STRUCTURE: 'STRUCTURAL_ERROR'
+});
+
+// ---- 13. Capability grounding (§9/§28, disclosures 12-14) --------------------
+// The table maps root causes to strategy recipes grounded in REGISTERED
+// mutation tools (T05/T06/T07/T08/T09/T10/T11/T12 of tools.js). The TEST
+// SUITE verifies every toolId against the live registry and asserts the
+// mutation class; this module stays zero-import (pinned contract). The three
+// non-executable causes (SEMANTIC_ERROR, CONSTRAINT_VIOLATION, UNKNOWN) have
+// ZERO recipes — the §28 honest gaps (T19/T20 are proposal-class, T16-T18
+// read-class). Declaration order is the deterministic tie-break order.
+
+export const CORRECTION_CAPABILITY_RECIPES = deepFreeze([
+  { name: 'translate-to-target',    rootCause: 'POSITION_ERROR',   metrics: ['position'],
+    command: { kind: 'MoveObject', toolId: 'T05' }, risk: 'LOW',    reversible: true, confidence: 1, scope: 'LOCAL' },
+  { name: 'scale-to-target-size',   rootCause: 'SIZE_ERROR',       metrics: ['size'],
+    command: { kind: 'TransformObject', toolId: 'T06' }, risk: 'MEDIUM', reversible: true, confidence: 1, scope: 'LOCAL' },
+  { name: 'normalize-transform',    rootCause: 'TRANSFORM_ERROR',  metrics: ['geometry', 'transform'],
+    command: { kind: 'TransformObject', toolId: 'T06' }, risk: 'MEDIUM', reversible: true, confidence: 1, scope: 'LOCAL' },
+  { name: 'distribute-to-spacing',  rootCause: 'SPACING_ERROR',    metrics: ['spacing'],
+    command: { kind: 'MoveObject', toolId: 'T09' }, risk: 'MEDIUM', reversible: true, confidence: 1, scope: 'LOCAL' },
+  { name: 'align-to-axis',          rootCause: 'ALIGNMENT_ERROR',  metrics: ['alignment', 'symmetry'],
+    command: { kind: 'MoveObject', toolId: 'T08' }, risk: 'MEDIUM', reversible: true, confidence: 1, scope: 'LOCAL' },
+  { name: 'apply-corrected-style',  rootCause: 'STYLE_ERROR',      metrics: ['appearance', 'style', 'fill'],
+    command: { kind: 'UpdateAppearance', toolId: 'T07' }, risk: 'LOW', reversible: true, confidence: 1, scope: 'LOCAL' },
+  { name: 'reorder-to-zorder',      rootCause: 'STRUCTURAL_ERROR', metrics: ['structure.zorder', 'structure.order'],
+    command: { kind: 'SetZOrder', toolId: 'T12' }, risk: 'LOW', reversible: true, confidence: 1, scope: 'LOCAL' },
+  { name: 'regroup-into-container', rootCause: 'STRUCTURAL_ERROR', metrics: ['structure.grouping'],
+    command: { kind: 'CreateNode', toolId: 'T10' }, risk: 'MEDIUM', reversible: true, confidence: 1, scope: 'SUBTREE' },
+  { name: 'dissolve-group',         rootCause: 'STRUCTURAL_ERROR', metrics: ['structure.grouping'],
+    command: { kind: 'DeleteNode', toolId: 'T11' }, risk: 'MEDIUM', reversible: true, confidence: 1, scope: 'SUBTREE' }
+]);
+
+// Scene-independent impact profile (disclosure 16): which capability classes
+// reach beyond the target objects themselves. Hierarchy/boolean capabilities
+// (T04 delete-subtree, T10 group, T11 ungroup, T13 boolean) are SUBTREE;
+// everything else in the mutation set is LOCAL. Unknown toolIds default to
+// GLOBAL (conservative) in computeCorrectionImpact.
+export const CORRECTION_TOOL_SCOPE = deepFreeze({
+  T01: 'LOCAL', T02: 'LOCAL', T03: 'LOCAL', T04: 'SUBTREE', T05: 'LOCAL',
+  T06: 'LOCAL', T07: 'LOCAL', T08: 'LOCAL', T09: 'LOCAL', T10: 'SUBTREE',
+  T11: 'SUBTREE', T12: 'LOCAL', T13: 'SUBTREE', T14: 'LOCAL', T15: 'LOCAL'
+});
+
+// §19/§38 numeric encodings (disclosures 15/17).
+export const CORRECTION_SEVERITY_WEIGHTS = deepFreeze({ LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 });
+export const CORRECTION_SCOPE_WEIGHT = deepFreeze({ LOCAL: 1, SUBTREE: 0.5, GLOBAL: 0.25 });
+export const CORRECTION_SCOPE_RANK = deepFreeze({ LOCAL: 1, SUBTREE: 2, GLOBAL: 3 });
+export const CORRECTION_RISK_WEIGHT = deepFreeze({ LOW: 1, MEDIUM: 2, HIGH: 3 });
+export const CORRECTION_CORRECTABILITY_WEIGHTS = deepFreeze({ REVERSIBLE: 1, IRREVERSIBLE: 0.5 });
+
+// Exact-or-dot-boundary prefix matching, case-sensitive (disclosure 14):
+// 'alignment' matches 'alignment' and 'alignment.deviation.px' but NOT
+// 'alignmentX'.
+function metricMatches(metric, prefixes){
+  return prefixes.some(p => metric === p || metric.startsWith(p + '.'));
+}
+
+function expectedEffectFor(target){
+  const effect = { metric: target.metric, direction: 'TOWARD_TARGET' };
+  if (target.targetValue !== undefined) effect.targetValue = target.targetValue;
+  return effect;
+}
+
+// ---- 14. Diagnosis resolution (§8/§28) ---------------------------------------
+
+// [CHECKPOINT-B-KILLSITE-1] category → root-cause attribution
+export function resolveCorrectionDiagnosis(target){
+  const check = validateCorrectionTarget(target);
+  if (!check.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'resolveCorrectionDiagnosis requires a valid CorrectionTarget (§7)', check.errors);
+  }
+  const cause = CATEGORY_TO_ROOT_CAUSE[target.category];
+  const matched = CORRECTION_CAPABILITY_RECIPES.filter(r => r.rootCause === cause && metricMatches(target.metric, r.metrics));
+  if (matched.length === 0){
+    // §28 no-fabrication (disclosure 12): no executable capability exists for
+    // this cause+metric — NOTHING is proposed. The accepted Checkpoint A
+    // contract keeps diagnoses non-empty (empty recommendedStrategies is
+    // INVALID_DIAGNOSIS), so the honest output is the §3 'UNRESOLVED' path
+    // label as a distinct frozen resolution record, never a strategy-less
+    // diagnosis.
+    return deepFreeze({
+      status: 'NO_CAPABILITY',
+      targetId: target.id,
+      category: target.category,
+      rootCause: cause,
+      metric: target.metric,
+      objectIds: [...target.objectIds]
+    });
+  }
+  const strategies = matched.map(r => createCorrectionStrategy({
+    name: r.name,
+    applicableTo: [cause],
+    commands: [{ kind: r.command.kind, toolId: r.command.toolId, input: { objectIds: [...target.objectIds] } }],
+    expectedEffect: expectedEffectFor(target),
+    risk: r.risk,
+    reversible: r.reversible,
+    confidence: r.confidence
+  }));
+  const diagnosis = createCorrectionDiagnosis({
+    targetId: target.id,
+    rootCause: cause,
+    confidence: target.confidence,   // deterministic inheritance (disclosure 11 rationale, B-5)
+    affectedObjects: [...target.objectIds],
+    recommendedStrategies: strategies
+  });
+  return deepFreeze({ status: 'RESOLVED', diagnosis });
+}
+
+// Plural resolution: ONE diagnosis (or NO_CAPABILITY record) per target, in
+// TARGET INPUT ORDER — the first level of the deterministic output chain
+// (disclosure 18).
+export function resolveCorrectionDiagnoses(targets){
+  if (!Array.isArray(targets)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'resolveCorrectionDiagnoses requires an array of CorrectionTargets (§8: one resolution per target, input order preserved)');
+  }
+  return deepFreeze(targets.map(t => resolveCorrectionDiagnosis(t)));
+}
+
+// ---- 15. CorrectionImpact (§20) + CorrectionCost (§38) -----------------------
+
+export function computeCorrectionImpact(target, strategy){
+  const tCheck = validateCorrectionTarget(target);
+  if (!tCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'computeCorrectionImpact requires a valid CorrectionTarget (§7)', tCheck.errors);
+  }
+  const sCheck = validateCorrectionStrategy(strategy);
+  if (!sCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, 'computeCorrectionImpact requires a valid CorrectionStrategy (§9)', sCheck.errors);
+  }
+  // Scope = widest scope across the strategy's commands (disclosure 16).
+  let scope = 'LOCAL';
+  let rank = CORRECTION_SCOPE_RANK.LOCAL;
+  for (const cmd of strategy.commands){
+    const cmdScope = CORRECTION_TOOL_SCOPE[cmd.toolId] || 'GLOBAL'; // unknown toolId => conservative GLOBAL
+    const cmdRank = CORRECTION_SCOPE_RANK[cmdScope];
+    if (cmdRank > rank){ rank = cmdRank; scope = cmdScope; }
+  }
+  // SUBTREE records the affected subtree ROOTS (the target objects); the
+  // actual descendant enumeration requires scene access and happens at
+  // execution time (a later checkpoint).
+  const secondaryObjects = scope === 'SUBTREE' ? [...target.objectIds] : [];
+  return deepFreeze({
+    targetId: target.id,
+    strategyId: strategy.id,
+    scope,
+    secondaryObjects,
+    secondaryEffectCount: secondaryObjects.length,
+    reversible: strategy.reversible === true
+  });
+}
+
+export function computeCorrectionCost(target, strategy){
+  const tCheck = validateCorrectionTarget(target);
+  if (!tCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'computeCorrectionCost requires a valid CorrectionTarget (§7)', tCheck.errors);
+  }
+  const sCheck = validateCorrectionStrategy(strategy);
+  if (!sCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, 'computeCorrectionCost requires a valid CorrectionStrategy (§9)', sCheck.errors);
+  }
+  const seen = new Set();
+  for (const cmd of strategy.commands){
+    const ids = cmd && cmd.input && Array.isArray(cmd.input.objectIds) ? cmd.input.objectIds : [];
+    for (const id of ids){
+      if (typeof id === 'string' && id.length > 0) seen.add(id);
+    }
+  }
+  const objectCount = seen.size;
+  const riskWeight = CORRECTION_RISK_WEIGHT[strategy.risk];
+  return deepFreeze({
+    targetId: target.id,
+    strategyId: strategy.id,
+    commandCount: strategy.commands.length,
+    objectCount,
+    riskWeight,
+    total: riskWeight * (strategy.commands.length + objectCount)   // disclosure 17
+  });
+}
+
+// ---- 16. Strategy ranking (§19) ----------------------------------------------
+
+// [CHECKPOINT-B-KILLSITE-2] §19 priority = Severity × Confidence × Impact ×
+// Correctability (disclosure 15 encodings). Deterministic: same inputs => the
+// same ranked order, the same selected strategy. The sort is a descending
+// priority ordering with an explicit input-order tie-break (disclosure 18).
+export function rankCorrectionStrategies(target, diagnosis){
+  const tCheck = validateCorrectionTarget(target);
+  if (!tCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'rankCorrectionStrategies requires a valid CorrectionTarget (§7)', tCheck.errors);
+  }
+  const dCheck = validateCorrectionDiagnosis(diagnosis);
+  if (!dCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'rankCorrectionStrategies requires a valid CorrectionDiagnosis (§8)', dCheck.errors);
+  }
+  if (diagnosis.targetId !== target.id){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'rankCorrectionStrategies: diagnosis.targetId must name the ranked target (§8 coherence)', { targetId: target.id, diagnosisTargetId: diagnosis.targetId });
+  }
+  const sevW = CORRECTION_SEVERITY_WEIGHTS[target.severity];
+  const entries = diagnosis.recommendedStrategies.map((s, inputOrder) => {
+    const sCheck = validateCorrectionStrategy(s);
+    if (!sCheck.valid){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, `rankCorrectionStrategies: recommendedStrategies[${inputOrder}] must be a valid CorrectionStrategy (§9)`, sCheck.errors);
+    }
+    const impact = computeCorrectionImpact(target, s);
+    const impW = CORRECTION_SCOPE_WEIGHT[impact.scope];
+    const corrW = s.reversible ? CORRECTION_CORRECTABILITY_WEIGHTS.REVERSIBLE : CORRECTION_CORRECTABILITY_WEIGHTS.IRREVERSIBLE;
+    const priority = sevW * s.confidence * impW * corrW;
+    return { strategy: s, priority, factors: { severity: sevW, confidence: s.confidence, impact: impW, correctability: corrW }, impact, cost: computeCorrectionCost(target, s), inputOrder };
+  });
+  entries.sort((a, b) => (b.priority - a.priority) || (a.inputOrder - b.inputOrder));
+  const ranked = entries.map(e => deepFreeze({
+    strategy: e.strategy,
+    priority: e.priority,
+    factors: e.factors,
+    impact: e.impact,
+    cost: e.cost
+  }));
+  return deepFreeze({ status: 'SELECTED', ranked, selected: ranked[0].strategy });
+}
+
+// ---- 17. Explainability (§27) -------------------------------------------------
+// Deterministic plain-data explanations of the two decision points that
+// select among options (cause attribution + strategy ranking). NO_CAPABILITY
+// resolutions are self-describing by construction (disclosure 12). Numbers
+// render via String() — canonical JS form, no locale, no entropy.
+
+export function explainCorrectionDiagnosis(target, diagnosis){
+  const tCheck = validateCorrectionTarget(target);
+  if (!tCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'explainCorrectionDiagnosis requires a valid CorrectionTarget (§7)', tCheck.errors);
+  }
+  const dCheck = validateCorrectionDiagnosis(diagnosis);
+  if (!dCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'explainCorrectionDiagnosis requires a valid CorrectionDiagnosis (§8)', dCheck.errors);
+  }
+  if (diagnosis.targetId !== target.id){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'explainCorrectionDiagnosis: diagnosis.targetId must name the explained target (§8 coherence)', { targetId: target.id, diagnosisTargetId: diagnosis.targetId });
+  }
+  const n = diagnosis.recommendedStrategies.length;
+  const summary = `Diagnosed ${target.category} deviation on ${target.objectIds.join(', ')} (metric ${target.metric}, observed ${String(target.observedValue)}) as ${diagnosis.rootCause} with confidence ${String(diagnosis.confidence)}; ${String(n)} capability-grounded correction strategy(ies) recommended.`;
+  const reasons = [
+    `target ${target.id} (${target.category}, metric ${target.metric}) attributes to root cause ${diagnosis.rootCause} via the category-root-cause table`,
+    `${String(n)} capability recipe(s) matched metric ${target.metric}; every recommended command references a registered mutation tool (live grounding discipline)`,
+    `diagnosis confidence ${String(diagnosis.confidence)} inherits the target's evidence confidence (deterministic, no entropy)`
+  ];
+  return deepFreeze({ subject: target.id, decision: 'DIAGNOSED', rootCause: diagnosis.rootCause, summary, reasons });
+}
+
+export function explainCorrectionStrategySelection(target, selection){
+  const tCheck = validateCorrectionTarget(target);
+  if (!tCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'explainCorrectionStrategySelection requires a valid CorrectionTarget (§7)', tCheck.errors);
+  }
+  if (!isPlainObject(selection) || selection.status !== 'SELECTED' || !Array.isArray(selection.ranked) || selection.ranked.length === 0 || !isPlainObject(selection.ranked[0]) || !isPlainObject(selection.selected)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, 'explainCorrectionStrategySelection requires a SELECTED rankCorrectionStrategies result (§19/§27)', { status: selection && selection.status });
+  }
+  const top = selection.ranked[0];
+  const f = top.factors;
+  const summary = `Selected correction strategy "${top.strategy.name}" (toolId ${top.strategy.commands[0].toolId}) with priority ${String(top.priority)} from ${String(selection.ranked.length)} ranked candidate(s); risk ${top.strategy.risk}, ${top.strategy.reversible ? 'reversible' : 'irreversible'}.`;
+  const factors = [
+    { label: 'severity', value: f.severity },
+    { label: 'confidence', value: f.confidence },
+    { label: 'impact', value: f.impact },
+    { label: 'correctability', value: f.correctability }
+  ];
+  const reasons = [
+    `§19 priority = Severity(${String(f.severity)}) × Confidence(${String(f.confidence)}) × Impact(${String(f.impact)}) × Correctability(${String(f.correctability)}) = ${String(top.priority)}`,
+    `selected from ${String(selection.ranked.length)} capability-grounded candidate(s); ties keep recommendation order (deterministic)`,
+    `cost model (§38): riskWeight ${String(top.cost.riskWeight)}, total ${String(top.cost.total)} over ${String(top.cost.commandCount)} command(s) and ${String(top.cost.objectCount)} object(s)`
+  ];
+  return deepFreeze({ subject: target.id, decision: 'SELECTED', strategyId: top.strategy.id, priority: top.priority, factors, alternatives: selection.ranked.length - 1, summary, reasons });
+}
+
+// ---- 18. Checkpoint C — capability input contract (§11, disclosure 19) ------
+// LOCAL mirror of the live T05-T12 validator requirements (shape CLASSES only;
+// the live-registry proof of necessity AND sufficiency is test C-18). The
+// module stays zero-import: this table is the planning-side authority for
+// "is this command descriptor schema-complete", while enum VALUES remain the
+// tools' execution-time authority. The mirror also records requireAny groups
+// where the live validator demands one-of several optional keys (T07: fill OR
+// opacity) — satisfied by CARRY (the strategy provided one) or by DERIVING the
+// derivable member (opacity from opacity-class metrics); fill records are
+// never fabricated.
+
+export const CORRECTION_CAPABILITY_INPUT_CONTRACT = deepFreeze({
+  T05: { required: { objectIds: 'string[]', delta: 'vec2' } },
+  T06: { required: { objectIds: 'string[]', transform: 'matrix' } },
+  // T07's live validator effectively requires fill OR opacity
+  // (tools.js: "fill or opacity required") even though inputSchema.required
+  // names only objectIds — the mirror records the requireAny group, and the
+  // deriver satisfies the DERIVABLE member (opacity) from opacity-class
+  // metrics. A fill record is never fabricated.
+  T07: { required: { objectIds: 'string[]' }, requireAny: ['fill', 'opacity'] },
+  T08: { required: { objectIds: 'string[]', axis: 'string', mode: 'string' } },
+  T09: { required: { objectIds: 'string[]', axis: 'string', mode: 'string' }, minObjectIds: 3 },
+  T10: { required: { objectIds: 'string[]' }, minObjectIds: 2 },
+  T11: { required: { objectIds: 'string[]' } },
+  T12: { required: { objectIds: 'string[]', operation: 'string' } }
+});
+
+function shapeClassOk(cls, v){
+  if (cls === 'string[]') return Array.isArray(v) && v.length > 0 && v.every(isNonEmptyString);
+  if (cls === 'string') return isNonEmptyString(v);
+  if (cls === 'number') return isFiniteNumber(v);
+  if (cls === 'vec2') return isPlainObject(v) && isFiniteNumber(v.x) && isFiniteNumber(v.y);
+  if (cls === 'matrix') return isPlainObject(v) && [v.a, v.b, v.c, v.d, v.tx, v.ty].every(isFiniteNumber);
+  return false;
+}
+
+function contractMissingKeys(contract, input){
+  const missing = [];
+  for (const key of Object.keys(contract.required)){
+    if (!shapeClassOk(contract.required[key], input[key])) missing.push(key);
+  }
+  if (Array.isArray(contract.requireAny) && !contract.requireAny.some(key => input[key] !== undefined)){
+    missing.push(...contract.requireAny);
+  }
+  if (contract.minObjectIds !== undefined){
+    const ids = Array.isArray(input.objectIds) ? input.objectIds : [];
+    if (!(ids.length >= contract.minObjectIds && ids.every(isNonEmptyString)) && !missing.includes('objectIds')){
+      missing.push('objectIds');
+    }
+  }
+  return missing;
+}
+
+// ---- 19. Axis-conflict model (§35-§37 planning gate, disclosure 20) ---------
+// Rule-based and conservative (§43 sanctions rule-based prediction). Canonical
+// axis order: x, y, width, height. A constraint type NOT in the table cannot
+// be proven preserved and rejects conservatively when hard.
+
+export const CONSTRAINT_PINNED_AXES = deepFreeze({
+  horizontal: ['y'],        // pins center-y (constraints.js:103-113)
+  alignCenterY: ['y'],
+  vertical: ['x'],          // pins center-x (constraints.js:114-125)
+  alignCenterX: ['x'],
+  alignLeft: ['x'],         // pins minX
+  alignRight: ['x'],        // pins maxX
+  alignTop: ['y'],          // pins minY
+  alignBottom: ['y'],       // pins maxY
+  equalWidth: ['width'],
+  equalHeight: ['height'],
+  fixedDistance: ['x', 'y'] // center distance depends on both axes
+});
+
+// 'DELTA' = axes read from the concrete input.delta (dx !== 0 -> 'x',
+// dy !== 0 -> 'y'); a T05 command whose delta is missing/non-finite is
+// classified conservatively as mutating everything. 'AXIS_PARAM' = refined by
+// the carried input.axis ('horizontal' mutates 'x', 'vertical' mutates 'y',
+// 'both' both; anything else conservative). Sets are canonical-order copies.
+export const TOOL_MUTATION_AXES = deepFreeze({
+  T05: 'DELTA',
+  T06: ['x', 'y', 'width', 'height'],   // affine geometry change — conservative
+  T07: [],                              // appearance — no geometric axis
+  T08: 'AXIS_PARAM',                    // align: translations along the axis
+  T09: 'AXIS_PARAM',                    // distribute: translations along the axis
+  T10: ['x', 'y', 'width', 'height'],   // hierarchy change — conservative
+  T11: ['x', 'y', 'width', 'height'],   // hierarchy change — conservative
+  T12: []                               // stacking — no geometric axis
+});
+
+const CANONICAL_AXES = ['x', 'y', 'width', 'height'];
+const ALL_AXES = deepFreeze(['x', 'y', 'width', 'height']);
+
+function axesForCommand(cmd){
+  const model = TOOL_MUTATION_AXES[cmd.toolId];
+  if (model === undefined) return [...ALL_AXES];               // unknown tool => conservative
+  if (model === 'DELTA'){
+    const d = isPlainObject(cmd.input) ? cmd.input.delta : undefined;
+    if (!isPlainObject(d) || !isFiniteNumber(d.x) || !isFiniteNumber(d.y)) return [...ALL_AXES];
+    const axes = [];
+    if (d.x !== 0) axes.push('x');
+    if (d.y !== 0) axes.push('y');
+    return axes;
+  }
+  if (model === 'AXIS_PARAM'){
+    const axis = isPlainObject(cmd.input) ? cmd.input.axis : undefined;
+    if (axis === 'horizontal') return ['x'];
+    if (axis === 'vertical') return ['y'];
+    if (axis === 'both') return ['x', 'y'];
+    return ['x', 'y'];                                         // unclassifiable => conservative
+  }
+  return [...model];
+}
+
+function unionMutationAxes(commands){
+  const set = new Set();
+  for (const cmd of commands) for (const axis of axesForCommand(cmd)) set.add(axis);
+  return CANONICAL_AXES.filter(a => set.has(a));
+}
+
+// ---- 20. Command materialization (§11/§43, disclosure 19) -------------------
+// Layered: CARRIED (schema-complete input passes through untouched) ->
+// DERIVED (deterministic rules from target evidence) -> NOT_DERIVABLE
+// (refused; nothing fabricated). objectIds derive from the target for every
+// tool (the target IS the §40 scope — the B resolver already pins exactly
+// this). Rules exist ONLY where target evidence deterministically yields the
+// missing parameter; richer materialization is execution-time with scene
+// access.
+
+function positionAxis(metric){
+  if (metric === 'position.x') return 'x';
+  if (metric === 'position.y') return 'y';
+  return null;
+}
+
+function isOpacityMetric(metric){
+  return ['appearance', 'style', 'fill'].some(p => metric === `${p}.opacity` || metric.startsWith(`${p}.opacity.`));
+}
+
+function deriveForTool(toolId, target, input){
+  // Returns { values, keys } or null. `input` is the strategy's input record.
+  const values = {};
+  const keys = [];
+  if (!shapeClassOk('string[]', input.objectIds)){
+    values.objectIds = [...target.objectIds];
+    keys.push('objectIds');
+  }
+  if (toolId === 'T05'){
+    const axis = positionAxis(target.metric);
+    if (axis === null || !isFiniteNumber(target.observedValue) || !isFiniteNumber(target.targetValue)) return null;
+    const delta = axis === 'x' ? { x: target.targetValue - target.observedValue, y: 0 } : { x: 0, y: target.targetValue - target.observedValue };
+    values.delta = delta;
+    keys.push('delta');
+  } else if (toolId === 'T07'){
+    if (!isOpacityMetric(target.metric) || !isFiniteNumber(target.targetValue) || target.targetValue < 0 || target.targetValue > 1) return null;
+    values.opacity = target.targetValue;
+    keys.push('opacity');
+  } else {
+    return null;   // no derivation rule for this tool (disclosure 19)
+  }
+  return { values, keys };
+}
+
+// [CHECKPOINT-C-KILLSITE-1] layered materialization engine
+export function deriveCorrectionCommands(target, strategy){
+  const tCheck = validateCorrectionTarget(target);
+  if (!tCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'deriveCorrectionCommands requires a valid CorrectionTarget (§7)', tCheck.errors);
+  }
+  const sCheck = validateCorrectionStrategy(strategy);
+  if (!sCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, 'deriveCorrectionCommands requires a valid CorrectionStrategy (§9)', sCheck.errors);
+  }
+  const commands = [];
+  const derivation = [];
+  for (let i = 0; i < strategy.commands.length; i++){
+    const cmd = strategy.commands[i];
+    if (!isPlainObject(cmd) || !isNonEmptyString(cmd.kind) || !isNonEmptyString(cmd.toolId)){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, `deriveCorrectionCommands: strategy.commands[${i}] must be a {kind, toolId, input} descriptor`, { index: i });
+    }
+    const input = isPlainObject(cmd.input) ? cmd.input : {};
+    const contract = CORRECTION_CAPABILITY_INPUT_CONTRACT[cmd.toolId];
+    const missing = contract ? contractMissingKeys(contract, input) : [];
+    if (contract && missing.length === 0){
+      commands.push({ ...cmd, input: plainCopy(input) });
+      derivation.push({ commandIndex: i, toolId: cmd.toolId, source: 'CARRIED', derivedKeys: [] });
+      continue;
+    }
+    const derived = contract ? deriveForTool(cmd.toolId, target, input) : null;
+    if (!contract || !derived || contractMissingKeys(contract, { ...plainCopy(input), ...derived.values }).length > 0){
+      return deepFreeze({
+        status: 'NOT_DERIVABLE',
+        reason: 'UNSATISFIED_INPUT_CONTRACT',
+        details: deepFreeze({ commandIndex: i, toolId: cmd.toolId, missing: deepFreeze(missing) })
+      });
+    }
+    commands.push({ kind: cmd.kind, toolId: cmd.toolId, input: { ...plainCopy(input), ...derived.values } });
+    derivation.push({ commandIndex: i, toolId: cmd.toolId, source: 'DERIVED', derivedKeys: [...derived.keys] });
+  }
+  return deepFreeze({ status: 'DERIVED', commands: deepFreeze(commands), derivation: deepFreeze(derivation) });
+}
+
+// ---- 21. Dependency scan (§41, disclosure 22) -------------------------------
+// Affected Objects -> Dependencies -> Constraints -> Semantic Relationships.
+// Injected duck-typed context (the evaluation.js documentContext discipline):
+//   context.scene      { findNodeByObjectId(objectId) -> node | undefined }
+//   context.constraints  plain records (the ConstraintStore.list() shape)
+//   context.semantic     plain records ({objectId, relationships:[{type,targetObjectId}]})
+// Absent stages are reported UNSCANNED — never silently "empty because
+// checked". Input breaches throw INVALID_PLAN (planning bucket, disclosure 22).
+
+export function scanCorrectionDependencies(objectIds, context){
+  if (!Array.isArray(objectIds) || objectIds.length === 0 || !objectIds.every(isNonEmptyString)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'scanCorrectionDependencies requires a non-empty array of object ids (§41)');
+  }
+  if (context !== undefined && !isPlainObject(context)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'scanCorrectionDependencies requires a plain-object context (injected, never constructed)');
+  }
+  const ctx = context || {};
+  const affected = [...objectIds];
+  const affectedSet = new Set(affected);
+
+  const sceneScanned = ctx.scene !== undefined;
+  if (sceneScanned && (!isPlainObject(ctx.scene) || typeof ctx.scene.findNodeByObjectId !== 'function')){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'scanCorrectionDependencies: context.scene must provide findNodeByObjectId(objectId)');
+  }
+  const dependencies = [];
+  if (sceneScanned){
+    for (const oid of affected){
+      const node = ctx.scene.findNodeByObjectId(oid);
+      if (node && isPlainObject(node)){
+        dependencies.push({ objectId: oid, nodeId: node.id, ancestors: Array.isArray(node.ancestors) ? [...node.ancestors] : [] });
+      }
+    }
+  }
+
+  const constraintsScanned = ctx.constraints !== undefined;
+  if (constraintsScanned && !Array.isArray(ctx.constraints)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'scanCorrectionDependencies: context.constraints must be an array of plain constraint records');
+  }
+  const touching = [];
+  if (constraintsScanned){
+    for (const c of ctx.constraints){
+      if (!isPlainObject(c) || !Array.isArray(c.objectIds)) continue;
+      if (c.objectIds.some(id => affectedSet.has(id))) touching.push(plainCopy(c));
+    }
+  }
+
+  const semanticScanned = ctx.semantic !== undefined;
+  if (semanticScanned && !Array.isArray(ctx.semantic)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'scanCorrectionDependencies: context.semantic must be an array of plain semantic records');
+  }
+  const semanticRelationships = [];
+  if (semanticScanned){
+    for (const record of ctx.semantic){
+      if (!isPlainObject(record) || !isNonEmptyString(record.objectId) || !Array.isArray(record.relationships)) continue;
+      for (const rel of record.relationships){
+        if (!isPlainObject(rel)) continue;
+        if (affectedSet.has(record.objectId) || affectedSet.has(rel.targetObjectId)){
+          semanticRelationships.push({ type: rel.type, sourceObjectId: record.objectId, targetObjectId: rel.targetObjectId });
+        }
+      }
+    }
+  }
+
+  return deepFreeze({
+    affectedObjects: affected,
+    dependencies: deepFreeze(dependencies),
+    constraints: deepFreeze(touching),
+    semanticRelationships: deepFreeze(semanticRelationships),
+    scanned: deepFreeze({ scene: sceneScanned, constraints: constraintsScanned, semantic: semanticScanned })
+  });
+}
+
+// ---- 22. Planning-time safety gate (§35-§37, disclosure 20) -----------------
+// Hard constraint preservation is MANDATORY: a hard (strength 'required',
+// enabled) constraint whose pinned axes intersect the correction's mutation
+// axes REJECTS the plan. Soft constraints may trade off and the trade-off is
+// recorded. Disabled constraints are invisible (evaluateConstraint semantics).
+// The §35 ConstraintCorrectionContext is carried verbatim on every verdict.
+
+// [CHECKPOINT-C-KILLSITE-2] hard-constraint rejection
+export function evaluateCorrectionSafety(affectedObjects, commands, constraints){
+  if (!Array.isArray(affectedObjects) || affectedObjects.length === 0 || !affectedObjects.every(isNonEmptyString)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'evaluateCorrectionSafety requires a non-empty array of affected object ids');
+  }
+  if (!Array.isArray(commands) || commands.length === 0 || !commands.every(isPlainObject)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'evaluateCorrectionSafety requires a non-empty array of command descriptors');
+  }
+  if (!Array.isArray(constraints)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'evaluateCorrectionSafety requires an array of plain constraint records');
+  }
+  const affectedSet = new Set(affectedObjects);
+  const mutationAxes = unionMutationAxes(commands);
+  const enabled = constraints.filter(c => isPlainObject(c) && c.enabled === true && Array.isArray(c.objectIds) && c.objectIds.some(id => affectedSet.has(id)));
+  const violated = [];
+  const softTradeOffs = [];
+  const preservedHard = [];
+  for (const c of enabled){
+    const pinned = CONSTRAINT_PINNED_AXES[c.type];
+    const conflicts = pinned === undefined || pinned.some(a => mutationAxes.includes(a));
+    if (c.strength === 'required'){
+      if (conflicts) violated.push(plainCopy(c));
+      else preservedHard.push(c.id);
+    } else if (conflicts){
+      softTradeOffs.push({ constraintId: c.id, type: c.type, strength: c.strength });
+    }
+  }
+  const rejected = violated.length > 0;
+  return deepFreeze({
+    status: rejected ? 'REJECTED' : 'PRESERVED',
+    context: deepFreeze({
+      violatedConstraints: deepFreeze(violated),
+      affectedConstraints: deepFreeze(enabled.map(c => c.id)),
+      hardConstraintViolation: rejected
+    }),
+    softTradeOffs: deepFreeze(softTradeOffs),
+    hardConstraintsPreserved: deepFreeze(preservedHard),
+    mutationAxes: deepFreeze(mutationAxes)
+  });
+}
+
+// ---- 23. Scope control (§40) ------------------------------------------------
+// The correction touches ONLY required objects: every object id referenced by
+// any command input must belong to the required set. The generator enforces
+// this before assembly; the check is exported for engine-side re-verification.
+
+export function verifyCorrectionScope(requiredObjectIds, commands){
+  if (!Array.isArray(requiredObjectIds) || requiredObjectIds.length === 0 || !requiredObjectIds.every(isNonEmptyString)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'verifyCorrectionScope requires a non-empty array of required object ids (§40)');
+  }
+  if (!Array.isArray(commands) || commands.length === 0 || !commands.every(isPlainObject)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'verifyCorrectionScope requires a non-empty array of command descriptors');
+  }
+  const required = new Set(requiredObjectIds);
+  const referenced = [];
+  const violations = [];
+  for (let i = 0; i < commands.length; i++){
+    const input = isPlainObject(commands[i].input) ? commands[i].input : {};
+    const ids = Array.isArray(input.objectIds) ? input.objectIds.filter(isNonEmptyString) : [];
+    const offenders = [];
+    for (const id of ids){
+      if (!referenced.includes(id)) referenced.push(id);
+      if (!required.has(id) && !offenders.includes(id)) offenders.push(id);
+    }
+    if (offenders.length > 0){
+      violations.push({ commandIndex: i, toolId: commands[i].toolId, offenders });
+    }
+  }
+  return deepFreeze({
+    status: violations.length === 0 ? 'CONTAINED' : 'EXCEEDED',
+    referenced: deepFreeze(referenced),
+    violations: deepFreeze(violations)
+  });
+}
+
+// ---- 24. Plan generation (§10/§11) + preview (§42) --------------------------
+// generateCorrectionPlan orchestrates the deterministic planning chain
+// (disclosure 23): coherence -> materialize -> scope -> scan -> safety ->
+// assemble. Incoherent INPUTS throw the structure-specific codes; evidence-
+// based non-plans are frozen refusal records (never throws, never plans).
+
+export const PLAN_REFUSAL_REASONS = deepFreeze(['INSUFFICIENT_EVIDENCE', 'HARD_CONSTRAINT_REJECTED', 'OUT_OF_SCOPE']);
+
+function planRefusal(reason, details){
+  return deepFreeze({ status: 'PLAN_REFUSED', reason, details: deepFreeze(details) });
+}
+
+export function generateCorrectionPlan(request){
+  if (!isPlainObject(request)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'generateCorrectionPlan requires a plain-object request {sessionId, target, diagnosis, strategy, context?}');
+  }
+  const { sessionId, target, diagnosis, strategy, context } = request;
+  if (!isNonEmptyString(sessionId)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'generateCorrectionPlan requires a non-empty sessionId (§10: the plan is session-bound)');
+  }
+  const tCheck = validateCorrectionTarget(target);
+  if (!tCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'generateCorrectionPlan requires a valid CorrectionTarget (§7)', tCheck.errors);
+  }
+  const dCheck = validateCorrectionDiagnosis(diagnosis);
+  if (!dCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'generateCorrectionPlan requires a valid CorrectionDiagnosis (§8) — a NO_CAPABILITY resolution is NOT a diagnosis (§28)', dCheck.errors);
+  }
+  const sCheck = validateCorrectionStrategy(strategy);
+  if (!sCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, 'generateCorrectionPlan requires a valid CorrectionStrategy (§9)', sCheck.errors);
+  }
+  if (diagnosis.targetId !== target.id){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'generateCorrectionPlan: diagnosis.targetId must name the planned target (§8 coherence)', { targetId: target.id, diagnosisTargetId: diagnosis.targetId });
+  }
+  if (!diagnosis.recommendedStrategies.some(s => isPlainObject(s) && s.id === strategy.id)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, 'generateCorrectionPlan: the planned strategy must be a recommended strategy of the embedded diagnosis (§28: plans are diagnosis-backed)', { strategyId: strategy.id });
+  }
+  if (context !== undefined && !isPlainObject(context)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'generateCorrectionPlan: context must be undefined or a plain object (injected, never constructed)');
+  }
+
+  // 1. Materialize the factory-anchored commands (§11/§43).
+  const derived = deriveCorrectionCommands(target, strategy);
+  if (derived.status !== 'DERIVED'){
+    return planRefusal('INSUFFICIENT_EVIDENCE', {
+      commandIndex: derived.details.commandIndex,
+      toolId: derived.details.toolId,
+      missing: derived.details.missing
+    });
+  }
+  // 2. §40 scope containment.
+  const scope = verifyCorrectionScope([...target.objectIds], derived.commands);
+  if (scope.status === 'EXCEEDED'){
+    return planRefusal('OUT_OF_SCOPE', { violations: scope.violations });
+  }
+  // 3. §41 dependency scan (honest unscanned flags when no context).
+  const dependencies = scanCorrectionDependencies([...target.objectIds], context);
+  // 4. §35-§37 hard-constraint safety.
+  const constraints = context !== undefined && Array.isArray(context.constraints) ? context.constraints : [];
+  const hasConstraintContext = context !== undefined && Array.isArray(context.constraints);
+  const safety = evaluateCorrectionSafety([...target.objectIds], derived.commands, constraints);
+  if (safety.status === 'REJECTED'){
+    return planRefusal('HARD_CONSTRAINT_REJECTED', { context: safety.context });
+  }
+  // 5. Assemble the §10 plan (deterministic construction, disclosure 23).
+  const numeric = isFiniteNumber(target.observedValue) && isFiniteNumber(target.targetValue);
+  const to = target.targetValue === undefined ? null : target.targetValue;
+  const expectedImprovement = {
+    metric: target.metric,
+    from: target.observedValue,
+    to,
+    delta: numeric ? target.targetValue - target.observedValue : null,
+    direction: 'TOWARD_TARGET'
+  };
+  const impact = computeCorrectionImpact(target, strategy);
+  const riskAssessment = {
+    level: strategy.risk,
+    reversible: strategy.reversible === true,
+    scope: impact.scope,
+    secondaryObjectCount: impact.secondaryObjects.length
+  };
+  const preconditions = [
+    { kind: 'objects-exist', objectIds: [...target.objectIds] },
+    { kind: 'tools-available', toolIds: [...new Set(derived.commands.map(c => c.toolId))] }
+  ];
+  const postconditions = [
+    { kind: 'metric-moves-toward-target', metric: target.metric, from: target.observedValue, to }
+  ];
+  if (hasConstraintContext){
+    riskAssessment.constraints = { hardConstraintsPreserved: [...safety.hardConstraintsPreserved], softTradeOffs: plainCopy(safety.softTradeOffs) };
+    preconditions.push({ kind: 'hard-constraints-preserved', constraintIds: [...safety.hardConstraintsPreserved] });
+    postconditions.push({ kind: 'hard-constraints-intact', constraintIds: [...safety.hardConstraintsPreserved] });
+  }
+  const plan = createCorrectionPlan({
+    sessionId,
+    diagnosis,
+    strategy,
+    commands: derived.commands,
+    expectedImprovement,
+    riskAssessment,
+    preconditions,
+    postconditions
+  });
+  return deepFreeze({ status: 'READY', plan, planning: deepFreeze({ dependencies, safety, scope }) });
+}
+
+// §42 CorrectionPreview — the dry-run record shown before execution in the
+// suitable modes. expectedEvaluation is a §43 RULE_BASED prediction, NOT an
+// EvaluationResult (disclosure 21); risks carry the §38 cost and any §37
+// trade-offs recorded at planning time.
+export function buildCorrectionPreview(target, plan){
+  const tCheck = validateCorrectionTarget(target);
+  if (!tCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'buildCorrectionPreview requires a valid CorrectionTarget (§7)', tCheck.errors);
+  }
+  const pCheck = validateCorrectionPlan(plan);
+  if (!pCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'buildCorrectionPreview requires a valid CorrectionPlan (§10)', pCheck.errors);
+  }
+  if (plan.diagnosis.targetId !== target.id){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'buildCorrectionPreview: plan.diagnosis.targetId must name the previewed target (§8 coherence)', { targetId: target.id, diagnosisTargetId: plan.diagnosis.targetId });
+  }
+  const impact = computeCorrectionImpact(target, plan.strategy);
+  const affected = [...target.objectIds];
+  for (const id of impact.secondaryObjects){
+    if (!affected.includes(id)) affected.push(id);
+  }
+  const numeric = isFiniteNumber(target.observedValue) && isFiniteNumber(target.targetValue);
+  const expectedEvaluation = {
+    metric: target.metric,
+    before: target.observedValue,
+    expectedAfter: numeric ? target.targetValue : null,
+    expectedDelta: numeric ? target.targetValue - target.observedValue : null,
+    direction: 'TOWARD_TARGET',
+    basis: 'RULE_BASED'
+  };
+  const risks = {
+    level: plan.riskAssessment.level,
+    reversible: plan.riskAssessment.reversible === true,
+    scope: impact.scope,
+    secondaryObjectCount: impact.secondaryObjects.length,
+    cost: computeCorrectionCost(target, plan.strategy),
+    softTradeOffs: isPlainObject(plan.riskAssessment.constraints) && Array.isArray(plan.riskAssessment.constraints.softTradeOffs) ? plainCopy(plan.riskAssessment.constraints.softTradeOffs) : []
+  };
+  return deepFreeze({
+    affectedObjects: deepFreeze(affected),
+    commands: deepFreeze(plan.commands.map(c => plainCopy(c))),
+    expectedEvaluation: deepFreeze(expectedEvaluation),
+    risks: deepFreeze(risks)
+  });
+}
+
+// ---- 25. Checkpoint D — vocabularies ----------------------------------------
+
+export const CORRECTION_VERDICTS = deepFreeze(['ACCEPTED', 'REJECTED']);
+export const CORRECTION_REJECTION_REASONS = deepFreeze(['NO_IMPROVEMENT', 'METRIC_INVALID', 'CRITICAL_REGRESSION', 'STRUCTURAL_DAMAGE']);
+export const CORRECTION_EXECUTION_REFUSALS = deepFreeze(['TOOLS_UNAVAILABLE', 'TOOL_VALIDATION_FAILED']);
+
+// ---- 26. Evaluation shape guards (§4/§6 discipline; §12 authority stays in
+// evaluation.js) + shared measurement -----------------------------------------
+
+function evaluationShapeErrors(evaluation, label){
+  const errors = [];
+  if (!isPlainObject(evaluation)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, `${label} must be a plain-object evaluation record (§4/§6 shape guard)`));
+    return errors;
+  }
+  const fnPath = findFunctionPath(evaluation, label);
+  if (fnPath){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, `${label} must be plain data; function value at ${fnPath}`));
+    return errors;
+  }
+  if (!Array.isArray(evaluation.deviations)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, `${label}.deviations must be an array (the §12 validation authority stays in evaluation.js)`));
+    return errors;
+  }
+  for (let i = 0; i < evaluation.deviations.length; i++){
+    if (!isPlainObject(evaluation.deviations[i])){
+      errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, `${label}.deviations[${i}] must be a plain object`));
+    }
+  }
+  return errors;
+}
+
+function requireEvaluation(evaluation, label){
+  const errors = evaluationShapeErrors(evaluation, label);
+  if (errors.length > 0) throw new CorrectionError(errors[0].code, errors[0].message, errors);
+  return evaluation;
+}
+
+// The §14/§15 metric gap: deviations whose property matches the plan metric
+// (exact-or-dot-boundary, disclosure 14) on the target objects (plan-level
+// objectId null counts). Numeric mode (finite `to`): gap = max |actual − to|,
+// INVALID when any matching actual is non-finite. Count mode (null `to`):
+// gap = number of matching deviations. No matches = AT TARGET (gap 0).
+function metricGapOf(evaluation, metric, objectIds, to){
+  const numeric = isFiniteNumber(to);
+  const matches = evaluation.deviations.filter(d => {
+    if (!isNonEmptyString(d.property)) return false;
+    if (!(d.property === metric || d.property.startsWith(metric + '.'))) return false;
+    return d.objectId === undefined || d.objectId === null || objectIds.includes(d.objectId);
+  });
+  if (matches.length === 0) return { kind: numeric ? 'NUMERIC' : 'COUNT', gap: 0 };
+  if (numeric){
+    for (const d of matches){
+      if (!isFiniteNumber(d.actual)) return { kind: 'INVALID', gap: null };
+    }
+    let worst = 0;
+    for (const d of matches){
+      const g = Math.abs(d.actual - to);
+      if (g > worst) worst = g;
+    }
+    return { kind: 'NUMERIC', gap: worst };
+  }
+  return { kind: 'COUNT', gap: matches.length };
+}
+
+// ---- 27. Fingerprints (§30) + no-progress (§33) + oscillation (§31) ---------
+
+// [CHECKPOINT-D-KILLSITE-0] §30 CorrectionFingerprint: the content identity of
+// a correction (planId + diagnosis target + strategy + commands).
+export function computeCorrectionFingerprint(plan){
+  const pCheck = validateCorrectionPlan(plan);
+  if (!pCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'computeCorrectionFingerprint requires a valid CorrectionPlan (§10)', pCheck.errors);
+  }
+  return deepFreeze({
+    fingerprint: contentId('cfp-', { planId: plan.id, targetId: plan.diagnosis.targetId, strategyId: plan.strategy.id, commands: plan.commands }),
+    planId: plan.id,
+    targetId: plan.diagnosis.targetId,
+    strategyId: plan.strategy.id
+  });
+}
+
+// The evaluation-state fingerprint: status + sorted deviation ids (order
+//-insensitive). Deviations without ids hash their content — external records
+// are measured honestly, never assumed.
+export function computeEvaluationFingerprint(evaluation){
+  requireEvaluation(evaluation, 'evaluation');
+  const ids = evaluation.deviations.map(d => (isNonEmptyString(d.id) ? d.id : contentId('dev-', d))).sort();
+  return contentId('efp-', { status: evaluation.status === undefined ? null : evaluation.status, deviationIds: ids });
+}
+
+// §33 Δ: fingerprints equal ⟺ Δ=0. delta is the measured deviation-count
+// change (evidence, not the criterion — the fingerprints are the criterion).
+export function detectCorrectionNoProgress(request){
+  if (!isPlainObject(request)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'detectCorrectionNoProgress requires a plain-object request {beforeEvaluation, afterEvaluation}');
+  }
+  const before = requireEvaluation(request.beforeEvaluation, 'beforeEvaluation');
+  const after = requireEvaluation(request.afterEvaluation, 'afterEvaluation');
+  const beforeFingerprint = computeEvaluationFingerprint(before);
+  const afterFingerprint = computeEvaluationFingerprint(after);
+  return deepFreeze({
+    status: beforeFingerprint === afterFingerprint ? 'NO_PROGRESS' : 'PROGRESS',
+    beforeFingerprint,
+    afterFingerprint,
+    delta: after.deviations.length - before.deviations.length
+  });
+}
+
+// §31 oscillation: ANY recurrence in the iteration trail of evaluation
+// fingerprints (first recurrence reported, deterministic).
+export function detectCorrectionOscillation(fingerprints){
+  if (!Array.isArray(fingerprints) || !fingerprints.every(isNonEmptyString)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'detectCorrectionOscillation requires an array of evaluation fingerprints (§31)');
+  }
+  const seen = new Map();
+  for (let i = 0; i < fingerprints.length; i++){
+    const fp = fingerprints[i];
+    if (seen.has(fp)){
+      return deepFreeze({ oscillating: true, fingerprint: fp, firstIndex: seen.get(fp), repeatedIndex: i });
+    }
+    seen.set(fp, i);
+  }
+  return deepFreeze({ oscillating: false, fingerprint: null, firstIndex: -1, repeatedIndex: -1 });
+}
+
+// §33 idempotency gate: SKIP only when the candidate correction IS the
+// previous attempt's correction (fingerprint equality) AND that attempt
+// produced Δ=0 — re-applying a proven no-op is the definition of no-progress.
+export function shouldSkipCorrection(request){
+  if (!isPlainObject(request)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'shouldSkipCorrection requires a plain-object request {plan, previousAttempt}');
+  }
+  const { plan, previousAttempt } = request;
+  const pCheck = validateCorrectionPlan(plan);
+  if (!pCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'shouldSkipCorrection requires a valid CorrectionPlan (§10)', pCheck.errors);
+  }
+  const fingerprint = computeCorrectionFingerprint(plan).fingerprint;
+  if (previousAttempt === null || previousAttempt === undefined){
+    return deepFreeze({ skip: false, reason: null, fingerprint });
+  }
+  if (!isPlainObject(previousAttempt)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'shouldSkipCorrection: previousAttempt must be null or a {plan, beforeEvaluation, afterEvaluation} record');
+  }
+  const paCheck = validateCorrectionPlan(previousAttempt.plan);
+  if (!paCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'shouldSkipCorrection: previousAttempt.plan must be a valid CorrectionPlan (§10)', paCheck.errors);
+  }
+  const progress = detectCorrectionNoProgress({ beforeEvaluation: previousAttempt.beforeEvaluation, afterEvaluation: previousAttempt.afterEvaluation });
+  const sameFingerprint = computeCorrectionFingerprint(previousAttempt.plan).fingerprint === fingerprint;
+  if (sameFingerprint && progress.status === 'NO_PROGRESS'){
+    return deepFreeze({ skip: true, reason: 'NO_PROGRESS_IDEMPOTENT', fingerprint });
+  }
+  return deepFreeze({ skip: false, reason: null, fingerprint });
+}
+
+// ---- 28. Best-state preservation (§16) ---------------------------------------
+
+function evaluationRank(evaluation){
+  let errorCount = 0, warningCount = 0;
+  const ids = [];
+  for (const d of evaluation.deviations){
+    ids.push(isNonEmptyString(d.id) ? d.id : contentId('dev-', d));
+    if (d.severity === 'error') errorCount++;
+    else if (d.severity === 'warning') warningCount++;
+  }
+  ids.sort();
+  return [errorCount, warningCount, ids.join('|')];
+}
+
+// Strict total order (disclosure 30): fewer errors first, then fewer
+// warnings, then the canonical sorted-id list. Equal content is NOT better.
+export function isBetterEvaluation(candidate, incumbent){
+  requireEvaluation(candidate, 'candidateEvaluation');
+  requireEvaluation(incumbent, 'incumbentEvaluation');
+  const a = evaluationRank(candidate), b = evaluationRank(incumbent);
+  if (a[0] !== b[0]) return a[0] < b[0];
+  if (a[1] !== b[1]) return a[1] < b[1];
+  return a[2] < b[2];
+}
+
+// §16: if (isBetter(current, best)) best = current — the loop never assumes
+// the last state is best. Returns the surviving evaluation BY REFERENCE (§4
+// records are immutable; identity preservation is the point).
+export function preserveCorrectionBestState(request){
+  if (!isPlainObject(request)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'preserveCorrectionBestState requires a plain-object request {bestEvaluation, candidateEvaluation, policy}');
+  }
+  const { bestEvaluation, candidateEvaluation, policy } = request;
+  const pCheck = validateCorrectionLoopPolicy(policy);
+  if (!pCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'preserveCorrectionBestState requires a valid §18 CorrectionLoopPolicy', pCheck.errors);
+  }
+  requireEvaluation(candidateEvaluation, 'candidateEvaluation');
+  if (bestEvaluation === undefined){
+    return deepFreeze({ bestEvaluation: candidateEvaluation, updated: true, preserved: false });
+  }
+  requireEvaluation(bestEvaluation, 'bestEvaluation');
+  if (policy.preserveBestState === false){
+    return deepFreeze({ bestEvaluation: candidateEvaluation, updated: true, preserved: false });
+  }
+  if (isBetterEvaluation(candidateEvaluation, bestEvaluation)){
+    return deepFreeze({ bestEvaluation: candidateEvaluation, updated: true, preserved: false });
+  }
+  return deepFreeze({ bestEvaluation: bestEvaluation, updated: false, preserved: true });
+}
+
+// ---- 29. Regression detection (§15) ------------------------------------------
+
+// Cross-evaluation deviation identity (disclosure 29): WHAT is wrong WHERE —
+// real §13 ids change with content, identity does not.
+function deviationIdentity(d){
+  return `${isNonEmptyString(d.category) ? d.category : '?'}|${isNonEmptyString(d.property) ? d.property : '?'}|${d.objectId === undefined || d.objectId === null ? '' : d.objectId}`;
+}
+
+// [CHECKPOINT-D-KILLSITE-2] §15 RegressionReport
+export function detectCorrectionRegression(request){
+  if (!isPlainObject(request)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'detectCorrectionRegression requires a plain-object request {beforeEvaluation, afterEvaluation, target, plan, policy}');
+  }
+  const { beforeEvaluation, afterEvaluation, target, plan, policy } = request;
+  const before = requireEvaluation(beforeEvaluation, 'beforeEvaluation');
+  const after = requireEvaluation(afterEvaluation, 'afterEvaluation');
+  const tCheck = validateCorrectionTarget(target);
+  if (!tCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'detectCorrectionRegression requires a valid CorrectionTarget (§7)', tCheck.errors);
+  }
+  const pCheck = validateCorrectionPlan(plan);
+  if (!pCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'detectCorrectionRegression requires a valid CorrectionPlan (§10)', pCheck.errors);
+  }
+  const polCheck = validateCorrectionLoopPolicy(policy);
+  if (!polCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'detectCorrectionRegression requires a valid §18 CorrectionLoopPolicy (the regression tolerance is policy-bound)', polCheck.errors);
+  }
+  const beforeByIdentity = new Map();
+  for (const d of before.deviations) beforeByIdentity.set(deviationIdentity(d), d);
+  const afterByIdentity = new Map();
+  for (const d of after.deviations) afterByIdentity.set(deviationIdentity(d), d);
+  const newDeviations = after.deviations.filter(d => !beforeByIdentity.has(deviationIdentity(d)));
+  const resolvedDeviations = before.deviations.filter(d => !afterByIdentity.has(deviationIdentity(d)));
+  const persistedDeviations = [];
+  const worsenedDeviations = [];
+  for (const d of after.deviations){
+    const identity = deviationIdentity(d);
+    const prev = beforeByIdentity.get(identity);
+    if (prev === undefined) continue;
+    persistedDeviations.push(d);
+    if (isFiniteNumber(prev.delta) && isFiniteNumber(d.delta)){
+      const growth = Math.abs(d.delta) - Math.abs(prev.delta);
+      if (growth > 0){
+        worsenedDeviations.push({
+          category: d.category, property: d.property,
+          objectId: d.objectId === undefined ? null : d.objectId,
+          beforeId: prev.id === undefined ? null : prev.id,
+          afterId: d.id === undefined ? null : d.id,
+          beforeDelta: prev.delta, afterDelta: d.delta, growth
+        });
+      }
+    }
+  }
+  const objectIds = [...target.objectIds];
+  const metric = plan.expectedImprovement.metric;
+  const to = plan.expectedImprovement.to;
+  const preGap = metricGapOf(before, metric, objectIds, to);
+  const postGap = metricGapOf(after, metric, objectIds, to);
+  let metricRegressed = false;
+  if (preGap.kind !== 'INVALID' && postGap.kind !== 'INVALID' && preGap.kind === postGap.kind){
+    metricRegressed = (postGap.gap - preGap.gap) > policy.maximumRegression;
+  }
+  const newErrorDeviations = newDeviations.filter(d => d.severity === 'error');
+  const worsenedCritical = worsenedDeviations.some(w => w.growth > policy.maximumRegression);
+  const criticalRegression = metricRegressed || newErrorDeviations.length > 0 || worsenedCritical;
+  return deepFreeze({
+    status: criticalRegression ? 'REGRESSED' : 'CLEAN',
+    criticalRegression,
+    metricRegressed,
+    newDeviations: deepFreeze(newDeviations.map(d => plainCopy(d))),
+    resolvedDeviations: deepFreeze(resolvedDeviations.map(d => plainCopy(d))),
+    persistedDeviations: deepFreeze(persistedDeviations.map(d => plainCopy(d))),
+    worsenedDeviations: deepFreeze(worsenedDeviations),
+    newErrorDeviations: deepFreeze(newErrorDeviations.map(d => plainCopy(d)))
+  });
+}
+
+// ---- 30. Execution (§11/§12) — the injected-substrate engine -----------------
+
+// Local mirror of the substrate's own tool-hosting working-copy view
+// (tools.js makeSubstrateWorkingCopy): mutation tools write through these
+// calls, the WorkingCopy journals them, the executor diffs and commits.
+function substrateWorkingCopyView(wc){
+  return {
+    wc,
+    nodes: wc.nodes,
+    createGeometry: (id, g) => wc.setGeometry(id, g),
+    createAppearance: (id, a) => wc.setAppearance(a),
+    createObject: o => wc.setObject(o),
+    createNode: (childId, parentId) => wc.setNode({ id: childId, objectRef: childId, parent: parentId || null, children: [], localTransform: { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 } }),
+    deleteObject: id => wc.deleteObject(id),
+    setNode: n => wc.setNode(n),
+    getObject: id => wc.getObject(id),
+    hasObject: id => wc.hasObject(id),
+    getGeometry: id => wc.getGeometry(id),
+    getAppearance: id => wc.getAppearance(id),
+    getNode: id => wc.getNode(id),
+    getRootNodes: () => { const roots = []; for (const n of wc.getNodes().values()) if (!n.parent && !n.parentId) roots.push(n); return roots; },
+    setGeometry: (id, g) => wc.setGeometry(id, g),
+    setAppearance: a => wc.setAppearance(a),
+    loadNode: (id, n) => wc.loadNode(id, n),
+    deleteNode: id => wc.deleteNode(id),
+    deleteGeometry: id => wc.deleteGeometry(id),
+    deleteAppearance: id => wc.deleteAppearance(id),
+    getNodes: () => wc.getNodes()
+  };
+}
+
+// One LIVE tool behind ONE Command (disclosure 26). The §32 inverse is
+// declared ONLY where tool semantics are exactly invertible (T05 translation
+// negation); everything else falls back to the executor's snapshot path.
+function correctionCommandFor(descriptor, index, plan, substrate){
+  const tool = substrate.registry.get(descriptor.toolId);
+  const input = plainCopy(isPlainObject(descriptor.input) ? descriptor.input : {});
+  const command = {
+    id: contentId('ccmd-', { planId: plan.id, commandIndex: index, toolId: descriptor.toolId }),
+    toolId: descriptor.toolId,
+    input,
+    deterministic: tool.deterministic === true,
+    execute(ctx){
+      const view = substrateWorkingCopyView(ctx.workingCopy);
+      const toolContext = { ...substrate, workingCopy: view };
+      const check = tool.validate(input, toolContext);
+      if (!check || check.valid !== true){
+        const msg = check && Array.isArray(check.errors) && check.errors[0] && check.errors[0].message ? check.errors[0].message : 'tool validation failed';
+        return { success: false, error: msg };
+      }
+      const result = tool.execute(input, toolContext);
+      if (!result || result.success !== true){
+        const msg = result && Array.isArray(result.errors) && result.errors[0] && result.errors[0].message ? result.errors[0].message : 'tool execution failed';
+        return { success: false, error: msg };
+      }
+      return { success: true };
+    },
+    getAffectedIds(){
+      const objects = Array.isArray(input.objectIds) ? input.objectIds.filter(isNonEmptyString) : [];
+      const nodes = [];
+      if (substrate.sceneGraph && typeof substrate.sceneGraph.findNodeByObjectId === 'function'){
+        for (const oid of objects){
+          const node = substrate.sceneGraph.findNodeByObjectId(oid);
+          if (node && node.id) nodes.push(node.id);
+        }
+      }
+      return { objects, nodes };
+    }
+  };
+  if (descriptor.toolId === 'T05' && isPlainObject(input.delta) && isFiniteNumber(input.delta.x) && isFiniteNumber(input.delta.y)){
+    command.getInverse = () => correctionCommandFor(
+      { kind: descriptor.kind, toolId: 'T05', input: { ...input, delta: { x: -input.delta.x, y: -input.delta.y } } },
+      index, plan, substrate
+    );
+  }
+  return command;
+}
+
+// Pre-flight (disclosure 27): every command must reference a REGISTERED tool
+// and pass the LIVE validator (schema gate over an empty context — the
+// substrate binds at execution). First refusal wins, deterministic.
+function executionPreflightRefusal(plan, substrate){
+  for (let i = 0; i < plan.commands.length; i++){
+    const cmd = plan.commands[i];
+    if (!isPlainObject(cmd) || !isNonEmptyString(cmd.toolId)){
+      return deepFreeze({
+        status: 'EXECUTION_REFUSED', reason: 'TOOL_VALIDATION_FAILED',
+        details: deepFreeze({ commandIndex: i, toolId: isNonEmptyString(cmd && cmd.toolId) ? cmd.toolId : null, errors: deepFreeze([{ code: 'INVALID_COMMAND_DESCRIPTOR', message: 'command descriptor must be {kind, toolId, input}' }]) })
+      });
+    }
+    if (!substrate.registry.has(cmd.toolId)){
+      return deepFreeze({
+        status: 'EXECUTION_REFUSED', reason: 'TOOLS_UNAVAILABLE',
+        details: deepFreeze({ commandIndex: i, toolId: cmd.toolId, errors: deepFreeze([{ code: 'TOOL_NOT_FOUND', message: `Tool ${cmd.toolId} not found` }]) })
+      });
+    }
+    const check = substrate.registry.validate(cmd.toolId, isPlainObject(cmd.input) ? cmd.input : {}, {});
+    if (!check || check.valid !== true){
+      return deepFreeze({
+        status: 'EXECUTION_REFUSED', reason: 'TOOL_VALIDATION_FAILED',
+        details: deepFreeze({ commandIndex: i, toolId: cmd.toolId, errors: deepFreeze(check && Array.isArray(check.errors) ? check.errors.map(e => plainCopy(e)) : []) })
+      });
+    }
+  }
+  return null;
+}
+
+// [CHECKPOINT-D-KILLSITE-1] §11/§12: plan -> ONE independent substrate
+// transaction per attempt.
+export function executeCorrectionAttempt(request){
+  if (!isPlainObject(request)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'executeCorrectionAttempt requires a plain-object request {session, target, plan, iteration, beforeEvaluation, substrate}');
+  }
+  const { session, target, plan, iteration, beforeEvaluation, substrate } = request;
+  const sCheck = validateCorrectionLoopSession(session);
+  if (!sCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'executeCorrectionAttempt requires a valid CorrectionLoopSession (§4)', sCheck.errors);
+  }
+  const tCheck = validateCorrectionTarget(target);
+  if (!tCheck.valid){
+    throw new CorrectionError(tCheck.errors[0].code, 'executeCorrectionAttempt requires a valid CorrectionTarget (§7)', tCheck.errors);
+  }
+  const pCheck = validateCorrectionPlan(plan);
+  if (!pCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'executeCorrectionAttempt requires a valid CorrectionPlan (§10)', pCheck.errors);
+  }
+  if (!isInteger(iteration) || iteration < 0){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'executeCorrectionAttempt: iteration must be an integer >= 0 (§6)', { iteration });
+  }
+  requireEvaluation(beforeEvaluation, 'beforeEvaluation');
+  if (plan.diagnosis.targetId !== target.id){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'executeCorrectionAttempt: plan.diagnosis.targetId must name the executed target (§8 coherence)', { targetId: target.id, diagnosisTargetId: plan.diagnosis.targetId });
+  }
+  if (plan.sessionId !== session.id){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'executeCorrectionAttempt: the plan executes only inside its owning session (§10 session-bound plans)', { planSessionId: plan.sessionId, sessionId: session.id });
+  }
+  if (!isPlainObject(substrate)
+      || !isPlainObject(substrate.registry) || typeof substrate.registry.has !== 'function' || typeof substrate.registry.get !== 'function' || typeof substrate.registry.validate !== 'function'
+      || !isPlainObject(substrate.transactionManager) || typeof substrate.transactionManager.execute !== 'function'
+      || !isPlainObject(substrate.transactionBuilder) || typeof substrate.transactionBuilder.begin !== 'function' || typeof substrate.transactionBuilder.addCommand !== 'function' || typeof substrate.transactionBuilder.build !== 'function'){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'executeCorrectionAttempt requires an injected substrate {registry, transactionManager, transactionBuilder} (duck-typed; the module stays zero-import — disclosure 24)');
+  }
+  // 1. Pre-flight against the LIVE registry (disclosure 27).
+  const refusal = executionPreflightRefusal(plan, substrate);
+  if (refusal !== null) return refusal;
+  // 2. The content-derived attempt transaction id, passed EXPLICITLY through
+  // TransactionBuilder.begin({id}) (disclosure 25).
+  const transactionId = contentId('atx-', { sessionId: plan.sessionId, planId: plan.id, targetId: target.id, iteration });
+  const builder = substrate.transactionBuilder.begin({
+    source: 'correction',
+    toolId: plan.commands[0].toolId,
+    description: `correction ${plan.strategy.name} (iteration ${iteration})`,
+    parentId: session.rootTransactionId,
+    id: transactionId
+  });
+  for (let i = 0; i < plan.commands.length; i++){
+    builder.addCommand(correctionCommandFor(plan.commands[i], i, plan, substrate));
+  }
+  const transaction = builder.build();
+  // 3. Execute — the substrate's own pipeline; a failure is ATOMIC (stores
+  // untouched, nothing pushed — the substrate's commit happens after all
+  // commands and validation succeed).
+  let committed = null, failure = null;
+  try { committed = substrate.transactionManager.execute(transaction); }
+  catch (e){ failure = e; }
+  if (failure !== null){
+    return deepFreeze({
+      status: 'FAILED',
+      attempt: createCorrectionAttempt({ iteration, target, plan, transactionId: transaction.id, beforeEvaluation, status: 'FAILED' }),
+      transaction: deepFreeze({ id: transaction.id, status: 'failed', inverseKind: null, commandCount: plan.commands.length, diffCounts: null }),
+      error: deepFreeze({ code: 'EXECUTION_ERROR', message: failure && failure.message ? String(failure.message) : 'transaction execution failed' })
+    });
+  }
+  return deepFreeze({
+    status: 'EXECUTED',
+    attempt: createCorrectionAttempt({ iteration, target, plan, transactionId: committed.id, beforeEvaluation, status: 'EXECUTED' }),
+    transaction: deepFreeze({
+      id: committed.id,
+      status: committed.status,
+      inverseKind: committed.inverse && committed.inverse.type ? committed.inverse.type : null,
+      commandCount: plan.commands.length,
+      diffCounts: deepFreeze({ added: committed.diff.added.length, removed: committed.diff.removed.length, modified: committed.diff.modified.length })
+    })
+  });
+}
+
+// ---- 31. Acceptance (§14) -----------------------------------------------------
+
+// [CHECKPOINT-D-KILLSITE-3] the §14 verdict over an EXECUTED attempt.
+export function acceptCorrectionAttempt(request){
+  if (!isPlainObject(request)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'acceptCorrectionAttempt requires a plain-object request {attempt, afterEvaluation, target, plan, policy, execution?}');
+  }
+  const { attempt, afterEvaluation, target, plan, policy, execution } = request;
+  const aCheck = validateCorrectionAttempt(attempt);
+  if (!aCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'acceptCorrectionAttempt requires a valid CorrectionAttempt (§6)', aCheck.errors);
+  }
+  if (attempt.status !== 'EXECUTED'){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, `acceptCorrectionAttempt requires an EXECUTED attempt stage (got ${attempt.status})`);
+  }
+  const after = requireEvaluation(afterEvaluation, 'afterEvaluation');
+  const before = requireEvaluation(attempt.beforeEvaluation, 'attempt.beforeEvaluation');
+  const tCheck = validateCorrectionTarget(target);
+  if (!tCheck.valid){
+    throw new CorrectionError(tCheck.errors[0].code, 'acceptCorrectionAttempt requires a valid CorrectionTarget (§7)', tCheck.errors);
+  }
+  const pCheck = validateCorrectionPlan(plan);
+  if (!pCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'acceptCorrectionAttempt requires a valid CorrectionPlan (§10)', pCheck.errors);
+  }
+  const polCheck = validateCorrectionLoopPolicy(policy);
+  if (!polCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'acceptCorrectionAttempt requires a valid §18 CorrectionLoopPolicy', polCheck.errors);
+  }
+  if (plan.diagnosis.targetId !== target.id){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'acceptCorrectionAttempt: plan.diagnosis.targetId must name the judged target (§8 coherence)', { targetId: target.id, diagnosisTargetId: plan.diagnosis.targetId });
+  }
+  if (attempt.plan.id !== plan.id){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'acceptCorrectionAttempt: the judged plan must be the attempt\'s plan (§6/§10 coherence)', { attemptPlanId: attempt.plan.id, planId: plan.id });
+  }
+  if (execution !== undefined && (!isPlainObject(execution) || execution.transactionId !== attempt.transactionId || execution.status !== 'committed')){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'acceptCorrectionAttempt: the supplied execution projection does not attest the attempt transaction', { transactionId: attempt.transactionId });
+  }
+  // Criterion 1 — PostEvaluation > PreEvaluation on the plan metric.
+  const objectIds = [...target.objectIds];
+  const metric = plan.expectedImprovement.metric;
+  const to = plan.expectedImprovement.to;
+  const preGap = metricGapOf(before, metric, objectIds, to);
+  const postGap = metricGapOf(after, metric, objectIds, to);
+  const kind = isFiniteNumber(to) ? 'NUMERIC' : 'COUNT';
+  const metricInvalid = preGap.kind === 'INVALID' || postGap.kind === 'INVALID';
+  const improvement = metricInvalid ? null : (preGap.gap - postGap.gap);
+  const improvementMet = !metricInvalid && improvement > 0;
+  // Criterion 2 — §15 regression gate.
+  const regression = detectCorrectionRegression({ beforeEvaluation: before, afterEvaluation: after, target, plan, policy });
+  // Criterion 3 — structural validity, remains-true semantics (disclosure 28).
+  const newStructureIds = regression.newDeviations.filter(d => d.category === 'structure').map(d => (d.id === undefined ? null : d.id));
+  // Criterion 4 — transaction validity (the EXECUTED stage attests the
+  // committed transaction; the optional projection was cross-checked above).
+  const transactionValid = {
+    met: attempt.status === 'EXECUTED',
+    checked: execution !== undefined,
+    transactionStatus: execution !== undefined ? execution.status : null
+  };
+  // Verdict (reasons in vocabulary order; a metric regression subsumes
+  // NO_IMPROVEMENT — disclosure 28).
+  const reasons = [];
+  if (metricInvalid) reasons.push('METRIC_INVALID');
+  else if (!improvementMet && !regression.metricRegressed) reasons.push('NO_IMPROVEMENT');
+  if (regression.criticalRegression) reasons.push('CRITICAL_REGRESSION');
+  if (newStructureIds.length > 0) reasons.push('STRUCTURAL_DAMAGE');
+  const status = reasons.length === 0 ? 'ACCEPTED' : 'REJECTED';
+  const stageStatus = status === 'ACCEPTED' ? 'IMPROVED' : (regression.criticalRegression ? 'REGRESSED' : 'NO_EFFECT');
+  const delta = {
+    metric,
+    before: preGap.gap,
+    after: postGap.gap,
+    improvement,
+    basis: 'MEASURED'
+  };
+  const stage = createCorrectionAttempt({
+    iteration: attempt.iteration,
+    target: attempt.target,
+    plan: attempt.plan,
+    transactionId: attempt.transactionId,
+    beforeEvaluation: attempt.beforeEvaluation,
+    status: stageStatus,
+    afterEvaluation,
+    delta
+  });
+  return deepFreeze({
+    status,
+    attemptId: attempt.id,
+    reasons: deepFreeze(reasons),
+    criteria: deepFreeze({
+      improvement: deepFreeze({ metric, kind, beforeGap: preGap.gap, afterGap: postGap.gap, improvement, met: improvementMet }),
+      noCriticalRegression: deepFreeze({ met: !regression.criticalRegression, report: regression }),
+      structuralValidity: deepFreeze({ met: newStructureIds.length === 0, newStructureDeviations: deepFreeze(newStructureIds) }),
+      transactionValid: deepFreeze(transactionValid)
+    }),
+    delta: deepFreeze(delta),
+    policyRollback: policy.rollbackOnCriticalRegression === true,
+    attempt: stage
+  });
+}
+
+// ---- 32. Rollback (§32) --------------------------------------------------------
+
+// The substrate's OWN undo (createInverseTransaction: command inverse
+// preferred, snapshot fallback — transaction.js:211-218/:288) behind a
+// top-of-history guard: the engine never undoes a foreign transaction.
+export function rollbackCorrectionAttempt(request){
+  if (!isPlainObject(request)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'rollbackCorrectionAttempt requires a plain-object request {attempt, substrate}');
+  }
+  const { attempt, substrate } = request;
+  const aCheck = validateCorrectionAttempt(attempt);
+  if (!aCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'rollbackCorrectionAttempt requires a valid CorrectionAttempt (§6)', aCheck.errors);
+  }
+  if (attempt.status === 'ROLLED_BACK'){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'rollbackCorrectionAttempt: the attempt is already ROLLED_BACK (§32)');
+  }
+  if (!isPlainObject(substrate) || !isPlainObject(substrate.transactionManager) || typeof substrate.transactionManager.undo !== 'function'
+      || !isPlainObject(substrate.transactionManager.historyManager) || typeof substrate.transactionManager.historyManager.getTransactionToUndo !== 'function'){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'rollbackCorrectionAttempt requires the injected transactionManager with its historyManager (duck-typed top-of-history check — disclosure 32)');
+  }
+  const toUndo = substrate.transactionManager.historyManager.getTransactionToUndo();
+  if (!toUndo || toUndo.id !== attempt.transactionId){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'rollbackCorrectionAttempt: the attempt transaction is not top-of-history — refusing to undo a foreign transaction (§32/§47)', { attemptTransactionId: attempt.transactionId, topTransactionId: toUndo ? toUndo.id : null });
+  }
+  const inverseKind = toUndo.inverse && toUndo.inverse.type ? toUndo.inverse.type : null;
+  let undone = null, failure = null;
+  try { undone = substrate.transactionManager.undo(); }
+  catch (e){ failure = e; }
+  if (failure !== null){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, `rollbackCorrectionAttempt: the substrate undo failed: ${failure && failure.message ? failure.message : 'undo error'}`);
+  }
+  return deepFreeze({
+    status: 'ROLLED_BACK',
+    attempt: createCorrectionAttempt({
+      iteration: attempt.iteration,
+      target: attempt.target,
+      plan: attempt.plan,
+      transactionId: attempt.transactionId,
+      beforeEvaluation: attempt.beforeEvaluation,
+      status: 'ROLLED_BACK'
+    }),
+    transaction: deepFreeze({ id: undone.id, parentId: undone.parentId, inverseKind })
+  });
+}
+
+// ---- 33. History integration metadata (§47/§48) --------------------------------
+
+export function buildCorrectionHistoryMetadata(session, attempt){
+  const sCheck = validateCorrectionLoopSession(session);
+  if (!sCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'buildCorrectionHistoryMetadata requires a valid CorrectionLoopSession (§4)', sCheck.errors);
+  }
+  const aCheck = validateCorrectionAttempt(attempt);
+  if (!aCheck.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'buildCorrectionHistoryMetadata requires a valid CorrectionAttempt (§6)', aCheck.errors);
+  }
+  return deepFreeze({
+    source: 'correction',
+    sessionId: session.id,
+    attemptId: attempt.id,
+    transactionId: attempt.transactionId,
+    iteration: attempt.iteration,
+    attemptStatus: attempt.status
+  });
+}
+
+// ---- 34. Checkpoint E — §25 request + §26 modes ------------------------------
+// The CorrectionLoopRequest is the ENGINE ENVELOPE: plain data for the agenda
+// and the policy, injected duck-typed authorities (critic / substrate /
+// document) for everything the module must never construct (zero-import pin).
+
+export const CORRECTION_LOOP_MODES = deepFreeze(['AUTO', 'GUIDED', 'SINGLE_STEP']);
+export const CORRECTION_ENGINE_STATUSES = deepFreeze(['RUNNING', 'AWAITING_APPROVAL', 'STEPPED', 'ROLLED_BACK', 'TERMINATED']);
+export const CORRECTION_ENGINE_OPERATIONS = deepFreeze(['start', 'iterate', 'run', 'terminate', 'rollback']);
+export const CORRECTION_ENGINE_ACTIONS = deepFreeze(['STARTED', 'PROPOSED', 'WAITED', 'APPROVED', 'PROPOSAL_REJECTED', 'ATTEMPT', 'MANUAL_ROLLBACK', 'TERMINATED']);
+export const CORRECTION_CONVERGENCE_KINDS = deepFreeze(['VERIFIED', 'NO_PROGRESS', 'OSCILLATION_DETECTED', 'MAX_ITERATIONS_REACHED', 'CONTINUE']);
+
+// The §26 dispatch table (disclosure 38): cyclesPerRun null = unbounded (the
+// convergence verdicts and the budget are the real bounds); stepBudget 1 =
+// one executed correction per engine lifetime.
+export const CORRECTION_MODE_DISPATCH = deepFreeze({
+  AUTO: deepFreeze({ cyclesPerRun: null, requiresApproval: false, stepBudget: null }),
+  GUIDED: deepFreeze({ cyclesPerRun: 1, requiresApproval: true, stepBudget: null }),
+  SINGLE_STEP: deepFreeze({ cyclesPerRun: 1, requiresApproval: false, stepBudget: 1 })
+});
+
+function substrateShapeError(substrate){
+  if (!isPlainObject(substrate)
+      || !isPlainObject(substrate.registry) || typeof substrate.registry.has !== 'function' || typeof substrate.registry.get !== 'function' || typeof substrate.registry.validate !== 'function'
+      || !isPlainObject(substrate.transactionManager) || typeof substrate.transactionManager.execute !== 'function'
+      || !isPlainObject(substrate.transactionBuilder) || typeof substrate.transactionBuilder.begin !== 'function' || typeof substrate.transactionBuilder.addCommand !== 'function' || typeof substrate.transactionBuilder.build !== 'function'){
+    return createError(CorrectionErrorCodes.INVALID_SESSION, 'request.substrate must be an injected duck-typed {registry, transactionManager, transactionBuilder} (disclosure 24; the module stays zero-import)');
+  }
+  return null;
+}
+
+export function validateCorrectionLoopRequest(request){
+  if (!isPlainObject(request)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_SESSION, 'CorrectionLoopRequest must be a plain object')] };
+  }
+  const errors = [];
+  if (!isNonEmptyString(request.rootIntentId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'request.rootIntentId must be a non-empty string (§4)'));
+  }
+  if (!isNonEmptyString(request.rootTransactionId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'request.rootTransactionId must be a non-empty string (§4)'));
+  }
+  if (!Array.isArray(request.targets) || request.targets.length === 0){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, 'request.targets must be a non-empty array of CorrectionTargets (§7: the correction agenda)'));
+  } else {
+    for (let i = 0; i < request.targets.length; i++){
+      const tCheck = validateCorrectionTarget(request.targets[i]);
+      if (!tCheck.valid){
+        errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, `request.targets[${i}] is not a valid CorrectionTarget (§7)`, tCheck.errors));
+        break;
+      }
+    }
+  }
+  if (request.policy === undefined){
+    errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, 'request.policy is mandatory (§18: no hidden engine defaults)'));
+  } else {
+    const polCheck = validateCorrectionLoopPolicy(request.policy);
+    if (!polCheck.valid){
+      errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, 'request.policy must be a valid §18 CorrectionLoopPolicy', polCheck.errors));
+    }
+  }
+  if (!isNonEmptyString(request.mode) || !CORRECTION_LOOP_MODES.includes(request.mode)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'request.mode must be a §26 CorrectionLoopMode (AUTO|GUIDED|SINGLE_STEP)', { value: request.mode === undefined ? null : request.mode }));
+  }
+  if (!isPlainObject(request.critic) || typeof request.critic.evaluate !== 'function'){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'request.critic must be an injected {evaluate(document, context) -> EvaluationResult} authority (§23 — the loop never self-evaluates)'));
+  }
+  if (request.document === undefined){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'request.document is mandatory (the §23 critic reads it — the engine never guesses a document)'));
+  }
+  const subError = substrateShapeError(request.substrate);
+  if (subError) errors.push(subError);
+  if (request.evaluationContext !== undefined && !isPlainObject(request.evaluationContext)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'request.evaluationContext must be undefined or a plain object (§23 context argument)'));
+  }
+  if (request.planningContext !== undefined && !isPlainObject(request.planningContext)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'request.planningContext must be undefined or a plain object (the C-era injected planning context)'));
+  }
+  // Plain-data scan over the PLAIN fields only (disclosure 33): the critic,
+  // substrate, and document are duck-typed authorities and may carry functions.
+  for (const [label, value, code] of [['targets', request.targets, CorrectionErrorCodes.INVALID_TARGET], ['policy', request.policy, CorrectionErrorCodes.INVALID_POLICY], ['evaluationContext', request.evaluationContext, CorrectionErrorCodes.INVALID_SESSION], ['planningContext', request.planningContext, CorrectionErrorCodes.INVALID_SESSION]]){
+    if (value === undefined) continue;
+    const fnPath = findFunctionPath(value, label);
+    if (fnPath) errors.push(createError(code, `request.${label} must be plain data; function value at ${fnPath}`));
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 35. §17 convergence detection -------------------------------------------
+// The engine's judgment OVER the critic's records (disclosure 35) — never a
+// second evaluation authority. [CHECKPOINT-E-KILLSITE-1]
+
+export function detectCorrectionConvergence(request){
+  if (!isPlainObject(request)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'detectCorrectionConvergence requires a plain-object request {agendaSatisfied, noProgressStreak, oscillation, budgetExhausted}');
+  }
+  const { agendaSatisfied, noProgressStreak, oscillation, budgetExhausted } = request;
+  if (typeof agendaSatisfied !== 'boolean'){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'detectCorrectionConvergence: agendaSatisfied must be a boolean (§17)');
+  }
+  if (!isInteger(noProgressStreak) || noProgressStreak < 0){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'detectCorrectionConvergence: noProgressStreak must be an integer >= 0 (§17/§33)', { value: noProgressStreak });
+  }
+  if (oscillation !== null && (!isPlainObject(oscillation) || typeof oscillation.oscillating !== 'boolean')){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'detectCorrectionConvergence: oscillation must be null or a {oscillating, ...} scan record (§31)');
+  }
+  if (typeof budgetExhausted !== 'boolean'){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'detectCorrectionConvergence: budgetExhausted must be a boolean (§18 hard stop)');
+  }
+  if (agendaSatisfied){
+    return deepFreeze({ kind: 'VERIFIED', evidence: deepFreeze({ agendaSatisfied: true }) });
+  }
+  if (noProgressStreak >= 2){
+    return deepFreeze({ kind: 'NO_PROGRESS', evidence: deepFreeze({ noProgressStreak, threshold: 2 }) });
+  }
+  if (oscillation !== null && oscillation.oscillating === true){
+    return deepFreeze({ kind: 'OSCILLATION_DETECTED', evidence: deepFreeze({ oscillation: deepFreeze({ oscillating: true, fingerprint: oscillation.fingerprint, firstIndex: oscillation.firstIndex, repeatedIndex: oscillation.repeatedIndex }) }) });
+  }
+  if (budgetExhausted){
+    return deepFreeze({ kind: 'MAX_ITERATIONS_REACHED', evidence: deepFreeze({ budgetExhausted: true }) });
+  }
+  return deepFreeze({ kind: 'CONTINUE', evidence: deepFreeze({}) });
+}
+
+// The gap-aware §31→§17 composition (disclosure 35): a recurrence COUNTS as
+// oscillation only when it returns to an earlier state after at least one
+// different state (repeatedIndex - firstIndex >= 2). Adjacent recurrence is
+// the no-progress streak's evidence.
+function oscillationScan(trail){
+  const seen = new Map();
+  for (let j = 0; j < trail.length; j++){
+    const fp = trail[j];
+    if (seen.has(fp) && j - seen.get(fp) >= 2){
+      return deepFreeze({ oscillating: true, fingerprint: fp, firstIndex: seen.get(fp), repeatedIndex: j });
+    }
+    if (!seen.has(fp)) seen.set(fp, j);
+  }
+  return deepFreeze({ oscillating: false, fingerprint: null, firstIndex: -1, repeatedIndex: -1 });
+}
+
+// ---- 36. §24 CorrectionEngine — start / iterate / run / terminate / rollback -
+// Pure functions over immutable shallow-frozen engine states (disclosure 34).
+// The engine never evaluates (§22), never mutates the substrate outside the
+// D-era attempt APIs, and never touches the HistoryManager.
+
+function engineState(partial){
+  return Object.freeze(partial);
+}
+
+// The engine-owned §4 session checkpoint (disclosure 34): the ONE sanctioned
+// derivation path for the fields the A-era APIs deliberately never touched.
+function patchEngineSession(session, patch){
+  const check = validateCorrectionLoopSession(session);
+  if (!check.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, 'patchEngineSession requires a valid §4 CorrectionLoopSession', check.errors);
+  }
+  const next = { ...session };
+  if (patch.iteration !== undefined){
+    if (!isInteger(patch.iteration) || patch.iteration < session.iteration){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, 'patchEngineSession: iteration must be an integer >= the current iteration (monotone budget)');
+    }
+    next.iteration = patch.iteration;
+  }
+  if (patch.corrections !== undefined){
+    if (!Array.isArray(patch.corrections) || patch.corrections.length < session.corrections.length){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, 'patchEngineSession: corrections must remain an array (append-only, §4)');
+    }
+    // Append-only with ONE sanctioned exception (disclosure 40): when the
+    // length is unchanged, the LAST element may be exchanged for a LATER
+    // STAGE of the SAME attempt (same iteration + target + plan) — a
+    // rollback finalizes the attempt's record as ROLLED_BACK.
+    const overlap = Math.min(patch.corrections.length, session.corrections.length);
+    const immutablePrefix = (patch.corrections.length === session.corrections.length && overlap > 0) ? overlap - 1 : overlap;
+    for (let i = 0; i < immutablePrefix; i++){
+      if (patch.corrections[i] !== session.corrections[i]){
+        throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, `patchEngineSession: corrections[${i}] changed — the trail is append-only (§4)`);
+      }
+    }
+    if (immutablePrefix < overlap && patch.corrections[overlap - 1] !== session.corrections[overlap - 1]){
+      const prev = session.corrections[overlap - 1];
+      const next = patch.corrections[overlap - 1];
+      const sameAttempt = isPlainObject(next) && isPlainObject(prev) && next.iteration === prev.iteration
+        && isPlainObject(next.target) && isPlainObject(prev.target) && next.target.id === prev.target.id
+        && isPlainObject(next.plan) && isPlainObject(prev.plan) && next.plan.id === prev.plan.id;
+      if (!sameAttempt){
+        throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, 'patchEngineSession: the exchanged final stage must belong to the SAME attempt (same iteration/target/plan — disclosure 40)');
+      }
+    }
+    next.corrections = [...patch.corrections];
+  }
+  if (patch.currentEvaluation !== undefined) next.currentEvaluation = requireEvaluation(patch.currentEvaluation, 'patch.currentEvaluation');
+  if (patch.bestEvaluation !== undefined) next.bestEvaluation = requireEvaluation(patch.bestEvaluation, 'patch.bestEvaluation');
+  const v = validateCorrectionLoopSession(next);
+  if (!v.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, 'patchEngineSession produced an invalid §4 record', v.errors);
+  }
+  return deepFreeze(next);
+}
+
+// Agenda measurement (disclosure 35/39) over the module's own §14 gap helper.
+function targetGapOf(evaluation, target){
+  return metricGapOf(evaluation, target.metric, [...target.objectIds], target.targetValue === undefined ? null : target.targetValue);
+}
+function agendaSatisfiedOf(targets, evaluation){
+  return targets.every(t => targetGapOf(evaluation, t).gap === 0);
+}
+function firstUnsatisfiedTarget(targets, evaluation){
+  for (const t of targets){
+    if (targetGapOf(evaluation, t).gap !== 0) return t;
+  }
+  return null;
+}
+// The working target refresh (disclosure 39): observedValue + evidence come
+// from the CURRENT critic evaluation; identity fields stay agenda-pinned.
+function refreshedAgendaTarget(agendaTarget, evaluation){
+  const gap = targetGapOf(evaluation, agendaTarget);
+  const objectIds = [...agendaTarget.objectIds];
+  if (gap.kind === 'INVALID' || gap.gap === 0) return agendaTarget;
+  const matches = evaluation.deviations.filter(d => isNonEmptyString(d.property)
+    && (d.property === agendaTarget.metric || d.property.startsWith(agendaTarget.metric + '.'))
+    && (d.objectId === undefined || d.objectId === null || objectIds.includes(d.objectId)));
+  let observed = agendaTarget.observedValue;
+  let evidence = plainCopy(agendaTarget.evidence);
+  if (matches.length > 0){
+    if (isFiniteNumber(agendaTarget.targetValue)){
+      let worst = null;
+      for (const d of matches){
+        if (!isFiniteNumber(d.actual)) continue;
+        if (worst === null || Math.abs(d.actual - agendaTarget.targetValue) > Math.abs(worst.actual - agendaTarget.targetValue)) worst = d;
+      }
+      if (worst !== null){
+        observed = worst.actual;
+        evidence = [{ type: 'METRIC', source: 'evaluation', objectIds, value: worst.actual }];
+      }
+    } else {
+      observed = matches.length;
+      evidence = [{ type: 'METRIC', source: 'evaluation', objectIds, value: matches.length }];
+    }
+  }
+  const content = { category: agendaTarget.category, objectIds, metric: agendaTarget.metric, observedValue: observed, severity: agendaTarget.severity, confidence: agendaTarget.confidence, evidence };
+  if (agendaTarget.targetValue !== undefined) content.targetValue = agendaTarget.targetValue;
+  return createCorrectionTarget(content);
+}
+
+// The deterministic exhaustion mapping (disclosure 39).
+function exhaustionReasonFor(lastBlocker){
+  if (!isPlainObject(lastBlocker)) return 'UNFIXABLE';
+  if (lastBlocker.source === 'SKIP') return 'NO_PROGRESS';
+  if (lastBlocker.source === 'PLAN_REFUSED' && lastBlocker.reason === 'HARD_CONSTRAINT_REJECTED') return 'CONSTRAINT_BLOCKED';
+  if (lastBlocker.source === 'EXECUTION_FAILED') return 'EXECUTION_ERROR';
+  return 'UNFIXABLE';
+}
+
+// The §3 CORRECTION_FAILED disposition route (disclosure 37): direct where the
+// machine has the edge, via DIAGNOSING→CORRECTING where it does not.
+function dispositionToRollingBack(session){
+  if (canTransition(session.state, 'ROLLING_BACK')) return transitionSession(session, 'ROLLING_BACK');
+  const d = transitionSession(session, 'DIAGNOSING');
+  const c = transitionSession(d, 'CORRECTING');
+  return transitionSession(c, 'ROLLING_BACK');
+}
+
+// [CHECKPOINT-E-KILLSITE-2 support] the give-up path — position-aware §50
+// termination through the machine's OWN edges (disclosure 37).
+function engineGiveUp(state, reason, reportExtra){
+  const from = state.session.state;
+  let session;
+  if (canTransition(from, 'TERMINATED')){
+    session = terminateSession(state.session, reason);
+  } else if (from === 'EVALUATING'){
+    let s = transitionSession(state.session, 'DIAGNOSING');
+    s = transitionSession(s, 'CORRECTING');
+    s = transitionSession(s, 'ROLLING_BACK');
+    session = terminateSession(s, reason);
+  } else if (from === 'IDLE'){
+    // the no-cycle rule: nothing was ever attempted — the ENGINE carries the
+    // verdict and the session stays honest at IDLE (disclosure 37).
+    return engineState({ ...state, status: 'TERMINATED', terminationReason: reason, pendingProposal: undefined, lastReport: deepFreeze({ action: 'TERMINATED', terminationReason: reason, convergenceKind: state.convergence ? state.convergence.kind : null, ...reportExtra }) });
+  } else {
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, `engineGiveUp: no §3 route to TERMINATED from ${from}`);
+  }
+  return engineState({ ...state, session, status: 'TERMINATED', terminationReason: reason, pendingProposal: undefined, lastReport: deepFreeze({ action: 'TERMINATED', terminationReason: reason, convergenceKind: state.convergence ? state.convergence.kind : null, ...reportExtra }) });
+}
+
+// Formation (disclosure 39): focus selection → refresh → resolve → rank →
+// candidate walk (plan refusals, §33 SKIPs, pre-flight refusals advance the
+// walk without consuming the iteration).
+function engineFormation(state){
+  const { request } = state;
+  const agendaTarget = firstUnsatisfiedTarget(request.targets, state.session.currentEvaluation);
+  if (agendaTarget === null){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'engineFormation: the convergence authority reported CONTINUE with a satisfied agenda (invariant breach)');
+  }
+  const workingTarget = refreshedAgendaTarget(agendaTarget, state.session.currentEvaluation);
+  const focusReset = state.focusTargetId !== agendaTarget.id;
+  const cursorFloor = focusReset ? 0 : state.cursorFloor;
+  const ledgerEntries = [];
+  const resolution = resolveCorrectionDiagnosis(workingTarget);
+  if (resolution.status === 'NO_CAPABILITY'){
+    ledgerEntries.push(deepFreeze({ source: 'NO_CAPABILITY', reason: 'NO_CAPABILITY', details: deepFreeze({ targetId: workingTarget.id, category: workingTarget.category, metric: workingTarget.metric }) }));
+    return { kind: 'EXHAUSTED', reason: exhaustionReasonFor({ source: 'NO_CAPABILITY' }), lastBlocker: { source: 'NO_CAPABILITY' }, ledgerEntries, focusTargetId: agendaTarget.id, cursorFloor };
+  }
+  const ranked = rankCorrectionStrategies(workingTarget, resolution.diagnosis).ranked;
+  let lastBlocker = null;
+  for (let i = cursorFloor; i < ranked.length; i++){
+    const outcome = generateCorrectionPlan({ sessionId: state.session.id, target: workingTarget, diagnosis: resolution.diagnosis, strategy: ranked[i].strategy, context: request.planningContext });
+    if (outcome.status === 'PLAN_REFUSED'){
+      ledgerEntries.push(deepFreeze({ source: 'PLAN_REFUSED', reason: outcome.reason, details: deepFreeze({ cursorIndex: i, targetId: workingTarget.id, details: outcome.details }) }));
+      lastBlocker = { source: 'PLAN_REFUSED', reason: outcome.reason };
+      continue;
+    }
+    const plan = outcome.plan;
+    const fingerprint = computeCorrectionFingerprint(plan).fingerprint;
+    const previous = state.iterationLedger.length > 0 ? state.iterationLedger[state.iterationLedger.length - 1] : null;
+    const skip = shouldSkipCorrection({ plan, previousAttempt: previous ? { plan: previous.plan, beforeEvaluation: previous.beforeEvaluation, afterEvaluation: previous.afterEvaluation } : null });
+    if (skip.skip){
+      ledgerEntries.push(deepFreeze({ source: 'SKIP', reason: skip.reason, details: deepFreeze({ cursorIndex: i, fingerprint }) }));
+      lastBlocker = { source: 'SKIP' };
+      continue;
+    }
+    // pre-flight BEFORE the session hops (disclosure 27 + 39): a pre-flight
+    // refusal is a formation-time blocker, never a consumed iteration.
+    const refusal = executionPreflightRefusal(plan, request.substrate);
+    if (refusal !== null){
+      ledgerEntries.push(deepFreeze({ source: 'EXECUTION_REFUSED', reason: refusal.reason, details: deepFreeze({ cursorIndex: i, details: refusal.details }) }));
+      lastBlocker = { source: 'EXECUTION_REFUSED', reason: refusal.reason };
+      continue;
+    }
+    return { kind: 'VIABLE', workingTarget, diagnosis: resolution.diagnosis, plan, fingerprint, cursorIndex: i, rankedCount: ranked.length, focusTargetId: agendaTarget.id, cursorFloor, ledgerEntries };
+  }
+  return { kind: 'EXHAUSTED', reason: exhaustionReasonFor(lastBlocker), lastBlocker, ledgerEntries, focusTargetId: agendaTarget.id, cursorFloor };
+}
+
+// The attempt cycle (§11/§12/§14 through the D-era APIs + §22 re-evaluation).
+function engineExecute(state, candidate, reportBase){
+  const { request } = state;
+  const stored = candidate.stored !== undefined;
+  const workingTarget = stored ? candidate.stored.target : candidate.workingTarget;
+  const plan = stored ? candidate.stored.plan : candidate.plan;
+  const cursorIndex = stored ? candidate.stored.cursorIndex : candidate.cursorIndex;
+  const beforeEvaluation = state.session.currentEvaluation;
+  // 1. cycle-entry hops (disclosure 37 work-then-transition)
+  let session = state.session;
+  if (session.state === 'IDLE'){
+    session = transitionSession(session, 'PLANNING');
+  } else {
+    session = transitionSession(session, 'DIAGNOSING');
+    session = transitionSession(session, 'CORRECTING');
+  }
+  // 2. the attempt transaction — ONE independent substrate transaction
+  const iteration = session.iteration + 1;
+  const execution = executeCorrectionAttempt({ session, target: workingTarget, plan, iteration, beforeEvaluation, substrate: request.substrate });
+  // 3. the §22 re-evaluation — THROUGH THE CRITIC, verbatim positional args
+  const afterEvaluation = request.critic.evaluate(request.document, request.evaluationContext);
+  requireEvaluation(afterEvaluation, 'critic re-evaluation');
+  // 4. the execution-phase hop + the evaluation-phase hop
+  session = transitionSession(session, session.state === 'PLANNING' ? 'EXECUTING' : 'RE_EXECUTING');
+  session = transitionSession(session, session.state === 'EXECUTING' ? 'EVALUATING' : 'RE_EVALUATING');
+  // 5. bookkeeping
+  const entryFingerprint = computeEvaluationFingerprint(beforeEvaluation);
+  const afterFingerprint = computeEvaluationFingerprint(afterEvaluation);
+  const trail = deepFreeze([...state.fingerprintTrail, afterFingerprint]);
+  const bestUpdate = preserveCorrectionBestState({ bestEvaluation: state.bestEvaluation, candidateEvaluation: afterEvaluation, policy: state.policy });
+  const best = bestUpdate.bestEvaluation;
+  let ledgerEntry = {
+    iteration,
+    plan,
+    beforeEvaluation,
+    afterEvaluation,
+    outcome: execution.status === 'FAILED' ? 'FAILED' : 'PENDING',
+    attempt: null
+  };
+  if (execution.status === 'FAILED'){
+    ledgerEntry.attempt = execution.attempt;
+    const streak = afterFingerprint === entryFingerprint ? state.noProgressStreak + 1 : 0;
+    const patched = patchEngineSession(session, { iteration, corrections: [...session.corrections, execution.attempt], currentEvaluation: afterEvaluation, bestEvaluation: best });
+    const disposition = dispositionToRollingBack(patched);
+    return engineConverge(engineState({ ...state, session: disposition, bestEvaluation: best, fingerprintTrail: trail, noProgressStreak: streak, executedAttempts: iteration, iterationLedger: deepFreeze([...state.iterationLedger, deepFreeze(ledgerEntry)]) }), reportBase, { iteration, attemptStatus: execution.attempt.status, verdict: 'FAILED' });
+  }
+  // 6. §14 acceptance
+  const acceptance = acceptCorrectionAttempt({ attempt: execution.attempt, afterEvaluation, target: workingTarget, plan, policy: state.policy });
+  ledgerEntry.outcome = acceptance.status === 'ACCEPTED' ? 'ACCEPTED' : 'NO_EFFECT';
+  ledgerEntry.attempt = acceptance.attempt;
+  let streak = afterFingerprint === entryFingerprint ? state.noProgressStreak + 1 : 0;
+  let working = engineState({ ...state, session: patchEngineSession(session, { iteration, corrections: [...session.corrections, acceptance.attempt], currentEvaluation: afterEvaluation, bestEvaluation: best }), bestEvaluation: best, fingerprintTrail: trail, noProgressStreak: streak, executedAttempts: iteration, iterationLedger: deepFreeze([...state.iterationLedger, deepFreeze(ledgerEntry)]) });
+  if (acceptance.status === 'REJECTED' && acceptance.attempt.status === 'REGRESSED' && acceptance.policyRollback){
+    // the §15 critical-regression edge: REAL §32 undo behind the machine's
+    // ROLLING_BACK disposition (disclosure 37). The streak is computed on the
+    // iteration's NET effect (the confirmation vs the entry state) — the
+    // transient post-attempt state must not reset the prior streak.
+    const disposition = dispositionToRollingBack(working.session);
+    const rb = rollbackCorrectionAttempt({ attempt: execution.attempt, substrate: request.substrate });
+    const confirmation = request.critic.evaluate(request.document, request.evaluationContext);
+    requireEvaluation(confirmation, 'rollback confirmation evaluation');
+    streak = computeEvaluationFingerprint(confirmation) === entryFingerprint ? state.noProgressStreak + 1 : 0;
+    const rolled = engineState({ ...working,
+      session: patchEngineSession(disposition, { corrections: [...working.session.corrections.slice(0, -1), rb.attempt], currentEvaluation: confirmation, bestEvaluation: working.bestEvaluation }),
+      noProgressStreak: streak,
+      iterationLedger: deepFreeze([...working.iterationLedger.slice(0, -1), deepFreeze({ ...ledgerEntry, outcome: 'REGRESSION_ROLLED_BACK', attempt: rb.attempt })])
+    });
+    return engineConverge(rolled, reportBase, { iteration, attemptStatus: rb.attempt.status, verdict: 'REGRESSION_ROLLED_BACK' });
+  }
+  return engineConverge(working, reportBase, { iteration, attemptStatus: acceptance.attempt.status, verdict: ledgerEntry.outcome });
+}
+
+// Convergence at the cycle-end position (EVALUATING / RE_EVALUATING /
+// ROLLING_BACK) — the §17 verdict decides everything (disclosure 35).
+function engineConverge(state, reportBase, attemptFacts){
+  const { request } = state;
+  const agendaOk = agendaSatisfiedOf(request.targets, state.session.currentEvaluation);
+  const oscillation = oscillationScan(state.fingerprintTrail);
+  const verdict = detectCorrectionConvergence({ agendaSatisfied: agendaOk, noProgressStreak: state.noProgressStreak, oscillation, budgetExhausted: state.session.iteration >= state.policy.maxIterations });
+  const withVerdict = engineState({ ...state, convergence: verdict });
+  if (verdict.kind === 'CONTINUE'){
+    const stepPause = state.mode === 'SINGLE_STEP' && state.executedAttempts >= CORRECTION_MODE_DISPATCH.SINGLE_STEP.stepBudget;
+    return engineState({ ...withVerdict, status: stepPause ? 'STEPPED' : 'RUNNING', lastReport: deepFreeze({ action: reportBase.action === 'APPROVED' ? 'APPROVED' : 'ATTEMPT', ...attemptFacts, convergenceKind: 'CONTINUE' }) });
+  }
+  if (verdict.kind === 'VERIFIED'){
+    if (!canTransition(state.session.state, 'VERIFIED')){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, `engineConverge: VERIFIED has no §3 edge from ${state.session.state} (invariant breach — a restored pre-attempt state is never agenda-satisfied)`);
+    }
+    let session = transitionSession(state.session, 'VERIFIED');
+    session = terminateSession(session, 'VERIFIED');
+    return engineState({ ...withVerdict, session, status: 'TERMINATED', terminationReason: 'VERIFIED', pendingProposal: undefined, lastReport: deepFreeze({ action: 'TERMINATED', terminationReason: 'VERIFIED', convergenceKind: 'VERIFIED', ...attemptFacts }) });
+  }
+  return engineGiveUp(withVerdict, verdict.kind, { ...attemptFacts });
+}
+
+// The continue driver: entry verdict (defensive), then formation → dispatch.
+function engineContinue(state, reportBase){
+  const agendaOk = agendaSatisfiedOf(state.request.targets, state.session.currentEvaluation);
+  const entryVerdict = detectCorrectionConvergence({ agendaSatisfied: agendaOk, noProgressStreak: state.noProgressStreak, oscillation: oscillationScan(state.fingerprintTrail), budgetExhausted: state.session.iteration >= state.policy.maxIterations });
+  if (entryVerdict.kind !== 'CONTINUE'){
+    if (entryVerdict.kind === 'VERIFIED'){
+      let session = canTransition(state.session.state, 'VERIFIED') ? transitionSession(state.session, 'VERIFIED') : state.session;
+      session = canTransition(session.state, 'TERMINATED') ? terminateSession(session, 'VERIFIED') : session;
+      const terminated = canTransition(state.session.state, 'TERMINATED') || session.state === 'TERMINATED';
+      if (terminated){
+        return engineState({ ...state, session, status: 'TERMINATED', terminationReason: 'VERIFIED', convergence: entryVerdict, lastReport: deepFreeze({ action: 'TERMINATED', terminationReason: 'VERIFIED', convergenceKind: 'VERIFIED' }) });
+      }
+      return engineGiveUp(engineState({ ...state, convergence: entryVerdict }), 'VERIFIED', {});
+    }
+    return engineGiveUp(engineState({ ...state, convergence: entryVerdict }), entryVerdict.kind, {});
+  }
+  const formation = engineFormation(state);
+  let working = state;
+  if (formation.ledgerEntries.length > 0){
+    working = engineState({ ...working, refusalLedger: deepFreeze([...working.refusalLedger, ...formation.ledgerEntries]) });
+  }
+  if (formation.kind === 'EXHAUSTED'){
+    // a SKIP-exhausted iteration IS a no-progress iteration (disclosure 39):
+    // the aborted candidate would have re-applied a proven no-op.
+    const streakBump = formation.lastBlocker && formation.lastBlocker.source === 'SKIP' ? 1 : 0;
+    return engineGiveUp(engineState({ ...working, focusTargetId: formation.focusTargetId, cursorFloor: formation.cursorFloor, noProgressStreak: state.noProgressStreak + streakBump, convergence: deepFreeze({ kind: 'CONTINUE', evidence: deepFreeze({}) }) }), formation.reason, reportBase);
+  }
+  const shared = { focusTargetId: formation.focusTargetId, cursorFloor: formation.cursorFloor };
+  if (state.mode === 'GUIDED'){
+    const proposal = deepFreeze({
+      target: formation.workingTarget,
+      diagnosis: formation.diagnosis,
+      strategy: formation.plan.strategy,
+      plan: formation.plan,
+      preview: buildCorrectionPreview(formation.workingTarget, formation.plan),
+      fingerprint: formation.fingerprint,
+      cursorIndex: formation.cursorIndex,
+      rankedCount: formation.rankedCount
+    });
+    return engineState({ ...working, ...shared, pendingProposal: proposal, status: 'AWAITING_APPROVAL', lastReport: deepFreeze({ action: 'PROPOSED', proposalFingerprint: formation.fingerprint, cursorIndex: formation.cursorIndex, targetId: formation.workingTarget.id }) });
+  }
+  return engineExecute(engineState({ ...working, ...shared }), formation, reportBase);
+}
+
+function engineStart(request){
+  const check = validateCorrectionLoopRequest(request);
+  if (!check.valid){
+    throw new CorrectionError(check.errors[0].code, 'CorrectionEngine.start requires a valid §25 CorrectionLoopRequest', check.errors);
+  }
+  const policy = request.policy;
+  const initialEvaluation = request.critic.evaluate(request.document, request.evaluationContext);
+  requireEvaluation(initialEvaluation, 'critic initial evaluation');
+  const session = createCorrectionLoopSession({ rootIntentId: request.rootIntentId, rootTransactionId: request.rootTransactionId, maxIterations: policy.maxIterations, initialEvaluation });
+  const verdict = detectCorrectionConvergence({ agendaSatisfied: agendaSatisfiedOf(request.targets, initialEvaluation), noProgressStreak: 0, oscillation: null, budgetExhausted: false });
+  const best = preserveCorrectionBestState({ bestEvaluation: undefined, candidateEvaluation: initialEvaluation, policy }).bestEvaluation;
+  const base = {
+    request,
+    session,
+    policy,
+    mode: request.mode,
+    status: undefined,
+    terminationReason: undefined,
+    convergence: verdict,
+    bestEvaluation: best,
+    fingerprintTrail: deepFreeze([computeEvaluationFingerprint(initialEvaluation)]),
+    noProgressStreak: 0,
+    executedAttempts: 0,
+    iterationLedger: deepFreeze([]),
+    refusalLedger: deepFreeze([]),
+    pendingProposal: undefined,
+    focusTargetId: null,
+    cursorFloor: 0,
+    lastReport: undefined
+  };
+  if (verdict.kind === 'VERIFIED'){
+    return engineState({ ...base, status: 'TERMINATED', terminationReason: 'VERIFIED', lastReport: deepFreeze({ action: 'STARTED', status: 'TERMINATED', convergenceKind: 'VERIFIED' }) });
+  }
+  return engineState({ ...base, status: 'RUNNING', lastReport: deepFreeze({ action: 'STARTED', status: 'RUNNING', convergenceKind: 'CONTINUE' }) });
+}
+
+function engineIterate(state, directive){
+  if (!isPlainObject(state) || state.status === undefined){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'engineIterate requires an engine state (start first, §24)');
+  }
+  if (state.status === 'TERMINATED'){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'engineIterate: the engine is TERMINATED (absorbing, §5)');
+  }
+  if (state.status === 'AWAITING_APPROVAL'){
+    if (directive === undefined || directive === null){
+      return engineState({ ...state, lastReport: deepFreeze({ action: 'WAITED', proposalFingerprint: state.pendingProposal.fingerprint }) });
+    }
+    if (!isPlainObject(directive) || typeof directive.approved !== 'boolean'){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'engineIterate: the approval directive must be {approved: boolean} (§26 GUIDED)');
+    }
+    if (directive.approved === false){
+      const ledger = deepFreeze([...state.refusalLedger, deepFreeze({ source: 'PROPOSAL_REJECTED', reason: 'HOST_REJECTED', details: deepFreeze({ proposalFingerprint: state.pendingProposal.fingerprint, cursorIndex: state.pendingProposal.cursorIndex }) })]);
+      return engineContinue(engineState({ ...state, pendingProposal: undefined, cursorFloor: state.pendingProposal.cursorIndex + 1, refusalLedger: ledger, convergence: deepFreeze({ kind: 'CONTINUE', evidence: deepFreeze({}) }) }), { proposalFingerprint: state.pendingProposal.fingerprint });
+    }
+    return engineExecute(engineState({ ...state, convergence: deepFreeze({ kind: 'CONTINUE', evidence: deepFreeze({}) }) }), { stored: state.pendingProposal }, { action: 'APPROVED', proposalFingerprint: state.pendingProposal.fingerprint });
+  }
+  if (directive !== undefined){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'engineIterate: approval directives are meaningful only while AWAITING_APPROVAL (§26)');
+  }
+  if (state.mode === 'SINGLE_STEP' && state.executedAttempts >= CORRECTION_MODE_DISPATCH.SINGLE_STEP.stepBudget){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'engineIterate: the SINGLE_STEP budget is spent — one correction per engine lifetime (§26)');
+  }
+  return engineContinue(engineState({ ...state, status: 'RUNNING', pendingProposal: undefined, convergence: deepFreeze({ kind: 'CONTINUE', evidence: deepFreeze({}) }) }), {});
+}
+
+function engineRun(state, directive){
+  if (!isPlainObject(state) || state.status === undefined){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'engineRun requires an engine state (start first, §24)');
+  }
+  const dispatch = CORRECTION_MODE_DISPATCH[state.mode];
+  if (dispatch.cyclesPerRun === null){
+    let current = state;
+    let guard = 0;
+    const cap = state.policy.maxIterations + 2;
+    while (current.status === 'RUNNING'){
+      if (guard++ > cap){
+        throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'engineRun exceeded the iteration bound — the termination invariant is violated (§17/§18)');
+      }
+      current = engineIterate(current, directive);
+    }
+    return current;
+  }
+  return engineIterate(state, directive);
+}
+
+function engineTerminate(state, reason){
+  if (!isPlainObject(state) || state.status === undefined){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'engineTerminate requires an engine state (start first, §24)');
+  }
+  if (state.status === 'TERMINATED'){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'engineTerminate: the engine is already TERMINATED (absorbing, §5)');
+  }
+  const session = terminateSession(state.session, reason);
+  return engineState({ ...state, session, status: 'TERMINATED', terminationReason: reason, lastReport: deepFreeze({ action: 'TERMINATED', terminationReason: reason, convergenceKind: state.convergence ? state.convergence.kind : null }) });
+}
+
+function engineRollback(state){
+  if (!isPlainObject(state) || state.status === undefined){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'engineRollback requires an engine state (start first, §24)');
+  }
+  if (state.status === 'TERMINATED'){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'engineRollback: the engine is TERMINATED (absorbing, §5)');
+  }
+  if (state.iterationLedger.length === 0){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'engineRollback: there is no attempt to undo (§32)');
+  }
+  const last = state.iterationLedger[state.iterationLedger.length - 1];
+  if (last.outcome === 'ROLLED_BACK' || last.outcome === 'FAILED' || last.outcome === 'REGRESSION_ROLLED_BACK'){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'engineRollback: the last attempt has nothing to undo (§32)', { outcome: last.outcome });
+  }
+  const rb = rollbackCorrectionAttempt({ attempt: last.attempt, substrate: state.request.substrate });
+  const session = dispositionToRollingBack(state.session);
+  const confirmation = state.request.critic.evaluate(state.request.document, state.request.evaluationContext);
+  requireEvaluation(confirmation, 'rollback confirmation evaluation');
+  const streak = computeEvaluationFingerprint(confirmation) === computeEvaluationFingerprint(last.beforeEvaluation) ? state.noProgressStreak + 1 : 0;
+  const ledger = deepFreeze([...state.iterationLedger.slice(0, -1), deepFreeze({ ...last, outcome: 'ROLLED_BACK', attempt: rb.attempt, afterEvaluation: confirmation })]);
+  const patched = patchEngineSession(session, { corrections: [...state.session.corrections.slice(0, -1), rb.attempt], currentEvaluation: confirmation, bestEvaluation: state.bestEvaluation });
+  return engineState({ ...state, session: patched, status: 'ROLLED_BACK', iterationLedger: ledger, noProgressStreak: streak, pendingProposal: undefined, lastReport: deepFreeze({ action: 'MANUAL_ROLLBACK', iteration: last.iteration, attemptStatus: 'ROLLED_BACK' }) });
+}
+
+// §24 verbatim: the five operations (disclosure 34).
+export const CorrectionEngine = deepFreeze({
+  start: engineStart,
+  iterate: engineIterate,
+  run: engineRun,
+  terminate: engineTerminate,
+  rollback: engineRollback
+});

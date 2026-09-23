@@ -1,0 +1,851 @@
+// PHASE 3.15 — CORRECTION LOOP EXECUTION (single-file module, house style).
+// Spec: PHASE 3.15 "Correction Loop Execution" §0-§72 + Working Discipline.
+// Closes the execution-feedback-correction loop between PHASE 3.13 (ai.js) and
+// PHASE 3.14 (evaluation.js / critic.js):
+//
+//   PLAN -> EXECUTE -> CRITIQUE -> DIAGNOSE -> CORRECT -> RE-EXECUTE -> VERIFY (§0)
+//
+// CHECKPOINT A SCOPE (this revision): the core data structures and the §3/§5
+// state machine only — CorrectionLoopSession (§4), CorrectionAttempt (§6),
+// CorrectionTarget (§7), CorrectionDiagnosis (§8), CorrectionStrategy (§9),
+// CorrectionPlan (§10), CorrectionLoopPolicy (§18), CorrectionTerminationReason
+// (§50), canTransition / transitionSession / terminateSession. The engine
+// wiring (§24 contract: start/iterate/run/rollback, diagnosis rules §8,
+// strategy selection §19, delta computation §13, acceptance §14, regression
+// §15, best-state §16, convergence/oscillation §17, fingerprints §30, audit
+// §46) lands in the later checkpoints — NOTHING here executes transactions or
+// touches stores; Checkpoint A is pure data + pure state mechanics.
+//
+// IMPORT CONTRACT (pinned): ZERO imports. All helpers are local copies in the
+// house single-file style (mirrors evaluation.js/critic.js, which also carry
+// private fnv1a32/stableStringify/deepFreeze copies). The module never reads
+// files, never imports node builtins, never constructs stores, and never
+// executes tools — the architecture scans pin this.
+//
+// DESIGN DISCLOSURES (spec-vocabulary decisions taken where the spec text is
+// prose-only or names a concept twice; none alters a §-typedef field list):
+//   1. §4 defines the session field `rootTransactionId`; §12's prose calls it
+//      `parentTransactionId`. The §4 typedef is formal and wins: the field is
+//      `rootTransactionId`. Disclosed here and in the checkpoint report.
+//   2. §3 draws five failure/completion paths whose STATE names differ from
+//      the §5 vocabulary ('ROLLBACK' -> ROLLING_BACK) or are path LABELS, not
+//      states ('UNRESOLVED', 'CORRECTION_FAILED', 'REGRESSION', 'NO_PROGRESS').
+//      The map below uses §5 names; the §3 labels survive as the semantic
+//      reasons documented on each edge.
+//   3. Five edges beyond the literal §3 diagram are REQUIRED for the loop the
+//      rest of the spec describes, each derived from a spec section:
+//        EVALUATING    -> VERIFIED      (§17 Verified: all criteria satisfied —
+//                                        the clean pass where nothing needs
+//                                        correcting; without it a zero-deviation
+//                                        document could never verify)
+//        RE_EVALUATING -> DIAGNOSING    (the §0/§16/§17 iteration cycle: after a
+//                                        non-verified, non-regressed, progressing
+//                                        re-evaluation the loop diagnoses again)
+//        ROLLING_BACK  -> DIAGNOSING    (§69: a rejected correction is followed
+//                                        by "Correction #2" — retry after rollback)
+//        ROLLING_BACK  -> TERMINATED    (give-up after rollback; §50 EXECUTION_ERROR)
+//        VERIFIED      -> TERMINATED    (§4 terminationReason + §50 VERIFIED: the
+//                                        verified session formally closes)
+//   4. §53 grants user cancellation at ANY iteration. terminateSession accepts
+//      USER_CANCELLED from EVERY non-terminated state (a user-authority
+//      overlay); every OTHER §50 reason still requires a §3/§5 map edge into
+//      TERMINATED. The map itself stays exactly the §3-derived graph.
+//   5. A TERMINATED session MUST carry its §50 reason (both directions,
+//      mirroring evaluation.js §12 gate-5 status/length discipline): the
+//      reasonless direct jump transitionSession(s,'TERMINATED') is refused
+//      with INVALID_TERMINATION even though RE_EVALUATING->TERMINATED remains
+//      a legal canTransition edge — the sanctioned path is terminateSession.
+//   6. Ids are content-derived (fnv1a32 over key-sorted canonical JSON of the
+//      content, house §12/§22/§44 pattern) with implementation prefixes:
+//      loop- / attempt- / ctarget- / diag- / strategy- / cplan-. The spec does
+//      not fix prefixes. Session ids hash the INITIAL content only, so the id
+//      is stable across transitions (state/trail evolve, identity does not).
+//   7. Confidence contracts: target/diagnosis confidence is a finite number in
+//      [0,1] (measurements may legitimately carry 0 — cf. §8 UNKNOWN);
+//      STRATEGY confidence is (0,1] — a zero-confidence strategy can never be
+//      ranked (§19 Priority = Severity × Confidence × Impact × Correctability)
+//      and can only arise from a defect.
+//   8. Error model mirrors the house pattern (evaluation.js:54-77): nine codes
+//      (INVALID_SESSION/ATTEMPT/TARGET/DIAGNOSIS/STRATEGY/PLAN/POLICY/
+//      TRANSITION/TERMINATION). The spec does not fix error codes.
+//   9. §4's evaluation-typed fields (initialEvaluation/currentEvaluation/
+//      bestEvaluation) and §6's beforeEvaluation/afterEvaluation are shape-
+//      guarded as plain data here — the full §12 validation authority remains
+//      in evaluation.js (the Critic/Evaluation stays the authority, §22/§23);
+//      Checkpoint A never imports it (see the pinned zero-import contract).
+//  10. §6 attempt ids hash the full record content INCLUDING status: each
+//      status stage is a distinct immutable audit record (records are never
+//      mutated in place — the engine checkpoints append stage records to
+//      session.corrections).
+
+// ---- 1. Error model (house pattern; see disclosure 8) -----------------------
+
+export const CorrectionErrorCodes = Object.freeze({
+  INVALID_SESSION: 'INVALID_SESSION',
+  INVALID_ATTEMPT: 'INVALID_ATTEMPT',
+  INVALID_TARGET: 'INVALID_TARGET',
+  INVALID_DIAGNOSIS: 'INVALID_DIAGNOSIS',
+  INVALID_STRATEGY: 'INVALID_STRATEGY',
+  INVALID_PLAN: 'INVALID_PLAN',
+  INVALID_POLICY: 'INVALID_POLICY',
+  INVALID_TRANSITION: 'INVALID_TRANSITION',
+  INVALID_TERMINATION: 'INVALID_TERMINATION'
+});
+
+export class CorrectionError extends Error {
+  constructor(code, message, details){
+    super(message);
+    this.name = 'CorrectionError';
+    this.code = code;
+    if (details !== undefined) this.details = details;
+  }
+}
+
+function createError(code, message, details){
+  const e = { code, message };
+  if (details !== undefined) e.details = details;
+  return e;
+}
+
+// ---- 2. Shared primitive guards + deterministic canonical form (§44) --------
+// Local copies in the house single-file style (see import contract above);
+// mirrors evaluation.js:80-126 / ai.js:159-166.
+
+function isPlainObject(v){ return v !== null && typeof v === 'object' && !Array.isArray(v); }
+function isFiniteNumber(v){ return typeof v === 'number' && Number.isFinite(v); }
+function isNonEmptyString(v){ return typeof v === 'string' && v.length > 0; }
+function isInteger(v){ return isFiniteNumber(v) && Number.isInteger(v); }
+
+// Depth-first scan: returns the path of the first function value, or null.
+// Every structure is plain data — correction records are inert (§26 spirit:
+// proposals are never commands; correction records are never callbacks).
+function findFunctionPath(value, path){
+  if (typeof value === 'function') return path || '(root)';
+  if (Array.isArray(value)){
+    for (let i = 0; i < value.length; i++){
+      const hit = findFunctionPath(value[i], `${path}[${i}]`);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (isPlainObject(value)){
+    for (const k of Object.keys(value)){
+      const hit = findFunctionPath(value[k], `${path}.${k}`);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+function deepFreeze(value){
+  if (isPlainObject(value) || Array.isArray(value)){
+    for (const k of Object.keys(value)) deepFreeze(value[k]);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+// Deep plain-data copy via canonical JSON: strips undefined-valued optionals
+// deterministically and severs aliasing with caller-held objects (house
+// pattern: ai.js createPlanningContext, evaluation.js snapshot inputs).
+function plainCopy(value){
+  return JSON.parse(JSON.stringify(value));
+}
+
+// Key-sorted serialization: identical logical content always yields an
+// identical string, independent of property insertion order (§44).
+function stableStringify(value){
+  if (value === undefined) return 'undefined';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (isPlainObject(value)){
+    const keys = Object.keys(value).sort();
+    return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+// FNV-1a, 32 bit. Pure integer arithmetic, no entropy, stable across engines
+// (mirrors ai.js:159-166 / evaluation.js:122-131 — the §16/§44 discipline).
+function fnv1a32(str){
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++){
+    h ^= str.charCodeAt(i);
+    h = (h + ((h << 1) >>> 0) + ((h << 4) >>> 0) + ((h << 7) >>> 0) + ((h << 8) >>> 0) + ((h << 24) >>> 0)) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+function contentId(prefix, content){
+  return prefix + fnv1a32(stableStringify(content));
+}
+
+function confidenceErrors(value, label, errors, code, { strictlyPositive = false } = {}){
+  if (!isFiniteNumber(value) || value < 0 || value > 1){
+    errors.push(createError(code, `${label} must be a finite number in [0,1]`, { field: label, value }));
+  } else if (strictlyPositive && value === 0){
+    errors.push(createError(code, `${label} must be strictly positive (a zero-confidence strategy can never be ranked, §19)`, { field: label, value }));
+  }
+}
+
+function plainObjectArrayErrors(value, label, errors, code, { allowEmpty = false, minItems = null } = {}){
+  if (!Array.isArray(value)){
+    errors.push(createError(code, `${label} must be an array`, { field: label }));
+    return;
+  }
+  if (!allowEmpty && value.length === 0){
+    errors.push(createError(code, `${label} must not be empty`, { field: label }));
+    return;
+  }
+  if (isFiniteNumber(minItems) && value.length < minItems){
+    errors.push(createError(code, `${label} must have at least ${minItems} entries`, { field: label }));
+  }
+  for (let i = 0; i < value.length; i++){
+    if (!isPlainObject(value[i])){
+      errors.push(createError(code, `${label}[${i}] must be a plain object`, { field: `${label}[${i}]` }));
+    }
+  }
+}
+
+// ---- 3. Vocabularies (spec §5, §50, §6, §7, §8, §9/§15) ---------------------
+
+export const CORRECTION_LOOP_STATES = Object.freeze([
+  'IDLE', 'PLANNING', 'EXECUTING', 'EVALUATING', 'DIAGNOSING', 'CORRECTING',
+  'RE_EXECUTING', 'RE_EVALUATING', 'VERIFIED', 'ROLLING_BACK', 'TERMINATED'
+]);
+
+export const CORRECTION_TERMINATION_REASONS = Object.freeze([
+  'VERIFIED', 'MAX_ITERATIONS_REACHED', 'NO_PROGRESS', 'OSCILLATION_DETECTED',
+  'UNFIXABLE', 'EXECUTION_ERROR', 'CONSTRAINT_BLOCKED', 'SEMANTIC_BLOCKED',
+  'USER_CANCELLED'
+]);
+
+export const CORRECTION_ATTEMPT_STATUSES = Object.freeze([
+  'PROPOSED', 'EXECUTED', 'IMPROVED', 'REGRESSED', 'NO_EFFECT', 'FAILED', 'ROLLED_BACK'
+]);
+
+export const CORRECTION_TARGET_CATEGORIES = Object.freeze([
+  'GEOMETRY', 'ALIGNMENT', 'SPACING', 'SYMMETRY', 'SIZE', 'POSITION',
+  'APPEARANCE', 'SEMANTIC', 'CONSTRAINT', 'TEXT', 'STRUCTURE'
+]);
+
+export const CORRECTION_SEVERITIES = Object.freeze(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
+
+export const CORRECTION_DIAGNOSIS_ROOT_CAUSES = Object.freeze([
+  'POSITION_ERROR', 'SIZE_ERROR', 'TRANSFORM_ERROR', 'SPACING_ERROR',
+  'ALIGNMENT_ERROR', 'STYLE_ERROR', 'STRUCTURAL_ERROR', 'SEMANTIC_ERROR',
+  'CONSTRAINT_VIOLATION', 'UNKNOWN'
+]);
+
+export const CORRECTION_STRATEGY_RISKS = Object.freeze(['LOW', 'MEDIUM', 'HIGH']);
+
+// ---- 4. CorrectionLoopPolicy (spec §18) -------------------------------------
+// The §18 values are implementation defaults, NOT claims about standard tools
+// (§18: "implementation defaults").
+
+const POLICY_DEFAULTS = Object.freeze({
+  maxIterations: 5,
+  maxCorrectionsPerIteration: 3,
+  minimumImprovement: 0.01,
+  maximumRegression: 0.05,
+  allowOscillationRecovery: false,
+  preserveBestState: true,
+  rollbackOnCriticalRegression: true
+});
+
+export function createCorrectionLoopPolicy(overrides){
+  const src = overrides === undefined ? {} : plainCopy(overrides);
+  if (!isPlainObject(src)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_POLICY, 'createCorrectionLoopPolicy requires a plain-object overrides record (or undefined)');
+  }
+  const fnPath = findFunctionPath(src, 'policy');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_POLICY, `policy overrides must be plain data; function value at ${fnPath}`);
+  return deepFreeze({ ...POLICY_DEFAULTS, ...src });
+}
+
+export function validateCorrectionLoopPolicy(policy){
+  const errors = [];
+  if (!isPlainObject(policy)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_POLICY, 'CorrectionLoopPolicy must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(policy, 'policy');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_POLICY, `policy must be plain data; function value at ${fnPath}`)] };
+  for (const key of Object.keys(POLICY_DEFAULTS)){
+    if (!Object.prototype.hasOwnProperty.call(policy, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, `policy.${key} is a mandatory §18 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isInteger(policy.maxIterations) || policy.maxIterations < 1){
+    errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, 'policy.maxIterations must be an integer >= 1 (§18 loop safety)', { value: policy.maxIterations }));
+  }
+  if (!isInteger(policy.maxCorrectionsPerIteration) || policy.maxCorrectionsPerIteration < 1){
+    errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, 'policy.maxCorrectionsPerIteration must be an integer >= 1 (§18)', { value: policy.maxCorrectionsPerIteration }));
+  }
+  if (!isFiniteNumber(policy.minimumImprovement) || policy.minimumImprovement < 0){
+    errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, 'policy.minimumImprovement must be a finite number >= 0 (§18)', { value: policy.minimumImprovement }));
+  }
+  if (!isFiniteNumber(policy.maximumRegression) || policy.maximumRegression < 0){
+    errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, 'policy.maximumRegression must be a finite number >= 0 (§18)', { value: policy.maximumRegression }));
+  }
+  for (const b of ['allowOscillationRecovery', 'preserveBestState', 'rollbackOnCriticalRegression']){
+    if (typeof policy[b] !== 'boolean'){
+      errors.push(createError(CorrectionErrorCodes.INVALID_POLICY, `policy.${b} must be a boolean (§18)`, { field: b, value: policy[b] }));
+    }
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 5. CorrectionTarget (spec §7) ------------------------------------------
+// The Critic does not produce commands; a failure first becomes a TARGET
+// (§7): what is wrong, on which objects, by how much, with evidence.
+
+const TARGET_CONTENT_KEYS = Object.freeze(['category', 'objectIds', 'metric', 'observedValue', 'severity', 'confidence', 'evidence']);
+
+export function createCorrectionTarget(content){
+  if (!isPlainObject(content)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'createCorrectionTarget requires a plain-object content record');
+  }
+  const fnPath = findFunctionPath(content, 'content');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, `target content must be plain data; function value at ${fnPath}`);
+  for (const required of TARGET_CONTENT_KEYS){
+    if (!Object.prototype.hasOwnProperty.call(content, required) || content[required] === undefined){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, `createCorrectionTarget requires '${required}' explicitly (deterministic construction, no hidden defaults)`, { field: required });
+    }
+  }
+  const t = plainCopy(content);
+  const errors = [];
+  targetFieldErrors(t, errors);
+  if (errors.length > 0) throw new CorrectionError(errors[0].code, errors[0].message, errors);
+  if (t.targetValue !== undefined && !isFiniteNumber(t.targetValue)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TARGET, 'target.targetValue must be undefined or a finite number (§7)', { value: t.targetValue });
+  }
+  return deepFreeze({ id: contentId('ctarget-', t), ...t });
+}
+
+function targetFieldErrors(t, errors){
+  if (!CORRECTION_TARGET_CATEGORIES.includes(t.category)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, `target.category must be one of the §7 categories`, { value: t.category }));
+  }
+  if (!Array.isArray(t.objectIds) || t.objectIds.length === 0 || !t.objectIds.every(isNonEmptyString)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, 'target.objectIds must be a non-empty array of non-empty strings (§7)'));
+  }
+  if (!isNonEmptyString(t.metric)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, 'target.metric must be a non-empty string (§7)'));
+  }
+  if (!isFiniteNumber(t.observedValue)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, 'target.observedValue must be a finite number (§7)', { value: t.observedValue }));
+  }
+  if (!CORRECTION_SEVERITIES.includes(t.severity)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, 'target.severity must be LOW|MEDIUM|HIGH|CRITICAL (§7)', { value: t.severity }));
+  }
+  confidenceErrors(t.confidence, 'target.confidence', errors, CorrectionErrorCodes.INVALID_TARGET);
+  plainObjectArrayErrors(t.evidence, 'target.evidence', errors, CorrectionErrorCodes.INVALID_TARGET);
+}
+
+export function validateCorrectionTarget(target){
+  const errors = [];
+  if (!isPlainObject(target)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_TARGET, 'CorrectionTarget must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(target, 'target');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_TARGET, `target must be plain data; function value at ${fnPath}`)] };
+  for (const key of ['id', ...TARGET_CONTENT_KEYS]){
+    if (!Object.prototype.hasOwnProperty.call(target, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, `target.${key} is a mandatory §7 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isNonEmptyString(target.id)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, 'target.id must be a non-empty string (content-derived, §44)'));
+  }
+  targetFieldErrors(target, errors);
+  if (target.targetValue !== undefined && !isFiniteNumber(target.targetValue)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_TARGET, 'target.targetValue must be undefined or a finite number (§7)'));
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 6. CorrectionDiagnosis (spec §8) ---------------------------------------
+// EvaluationResult says WHAT is bad; Diagnosis says WHY it is probably bad
+// (§8). It never executes and never mutates — it recommends.
+
+const DIAGNOSIS_CONTENT_KEYS = Object.freeze(['targetId', 'rootCause', 'confidence', 'affectedObjects', 'recommendedStrategies']);
+
+export function createCorrectionDiagnosis(content){
+  if (!isPlainObject(content)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'createCorrectionDiagnosis requires a plain-object content record');
+  }
+  const fnPath = findFunctionPath(content, 'content');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_DIAGNOSIS, `diagnosis content must be plain data; function value at ${fnPath}`);
+  for (const required of DIAGNOSIS_CONTENT_KEYS){
+    if (!Object.prototype.hasOwnProperty.call(content, required) || content[required] === undefined){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_DIAGNOSIS, `createCorrectionDiagnosis requires '${required}' explicitly (deterministic construction, no hidden defaults)`, { field: required });
+    }
+  }
+  const d = plainCopy(content);
+  const errors = [];
+  diagnosisFieldErrors(d, errors);
+  if (errors.length > 0) throw new CorrectionError(errors[0].code, errors[0].message, errors);
+  return deepFreeze({ id: contentId('diag-', d), ...d });
+}
+
+function diagnosisFieldErrors(d, errors){
+  if (!isNonEmptyString(d.targetId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'diagnosis.targetId must be a non-empty string naming a CorrectionTarget (§8)'));
+  }
+  if (!CORRECTION_DIAGNOSIS_ROOT_CAUSES.includes(d.rootCause)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'diagnosis.rootCause must be one of the §8 root causes', { value: d.rootCause }));
+  }
+  confidenceErrors(d.confidence, 'diagnosis.confidence', errors, CorrectionErrorCodes.INVALID_DIAGNOSIS);
+  if (!Array.isArray(d.affectedObjects) || d.affectedObjects.length === 0 || !d.affectedObjects.every(isNonEmptyString)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'diagnosis.affectedObjects must be a non-empty array of non-empty strings (§8)'));
+  }
+  plainObjectArrayErrors(d.recommendedStrategies, 'diagnosis.recommendedStrategies', errors, CorrectionErrorCodes.INVALID_DIAGNOSIS);
+}
+
+export function validateCorrectionDiagnosis(diagnosis){
+  const errors = [];
+  if (!isPlainObject(diagnosis)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'CorrectionDiagnosis must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(diagnosis, 'diagnosis');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, `diagnosis must be plain data; function value at ${fnPath}`)] };
+  for (const key of ['id', ...DIAGNOSIS_CONTENT_KEYS]){
+    if (!Object.prototype.hasOwnProperty.call(diagnosis, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, `diagnosis.${key} is a mandatory §8 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isNonEmptyString(diagnosis.id)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_DIAGNOSIS, 'diagnosis.id must be a non-empty string (content-derived, §44)'));
+  }
+  diagnosisFieldErrors(diagnosis, errors);
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 7. CorrectionStrategy (spec §9) ----------------------------------------
+// A named, risk-rated, reversible-when-possible correction recipe. Commands
+// are DESCRIPTORS (plain data) — the command objects themselves are built by
+// the execution checkpoints through the Command architecture (§11); a
+// strategy never carries functions (see the plain-data scan).
+
+const STRATEGY_CONTENT_KEYS = Object.freeze(['name', 'applicableTo', 'commands', 'expectedEffect', 'risk', 'reversible', 'confidence']);
+
+export function createCorrectionStrategy(content){
+  if (!isPlainObject(content)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, 'createCorrectionStrategy requires a plain-object content record');
+  }
+  const fnPath = findFunctionPath(content, 'content');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, `strategy content must be plain data; function value at ${fnPath}`);
+  for (const required of STRATEGY_CONTENT_KEYS){
+    if (!Object.prototype.hasOwnProperty.call(content, required) || content[required] === undefined){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_STRATEGY, `createCorrectionStrategy requires '${required}' explicitly (deterministic construction, no hidden defaults)`, { field: required });
+    }
+  }
+  const s = plainCopy(content);
+  const errors = [];
+  strategyFieldErrors(s, errors);
+  if (errors.length > 0) throw new CorrectionError(errors[0].code, errors[0].message, errors);
+  return deepFreeze({ id: contentId('strategy-', s), ...s });
+}
+
+function strategyFieldErrors(s, errors){
+  if (!isNonEmptyString(s.name)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, 'strategy.name must be a non-empty string (§9)'));
+  }
+  if (!Array.isArray(s.applicableTo) || s.applicableTo.length === 0 || !s.applicableTo.every(isNonEmptyString)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, 'strategy.applicableTo must be a non-empty array of non-empty strings (§9)'));
+  }
+  plainObjectArrayErrors(s.commands, 'strategy.commands', errors, CorrectionErrorCodes.INVALID_STRATEGY);
+  if (!isPlainObject(s.expectedEffect)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, 'strategy.expectedEffect must be a plain object (§9)'));
+  }
+  if (!CORRECTION_STRATEGY_RISKS.includes(s.risk)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, 'strategy.risk must be LOW|MEDIUM|HIGH (§9)', { value: s.risk }));
+  }
+  if (typeof s.reversible !== 'boolean'){
+    errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, 'strategy.reversible must be a boolean (§9)'));
+  }
+  // Strictly positive: a zero-confidence strategy can never be ranked (§19) —
+  // disclosure 7 in the module header.
+  confidenceErrors(s.confidence, 'strategy.confidence', errors, CorrectionErrorCodes.INVALID_STRATEGY, { strictlyPositive: true });
+}
+
+export function validateCorrectionStrategy(strategy){
+  const errors = [];
+  if (!isPlainObject(strategy)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_STRATEGY, 'CorrectionStrategy must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(strategy, 'strategy');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_STRATEGY, `strategy must be plain data; function value at ${fnPath}`)] };
+  for (const key of ['id', ...STRATEGY_CONTENT_KEYS]){
+    if (!Object.prototype.hasOwnProperty.call(strategy, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, `strategy.${key} is a mandatory §9 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isNonEmptyString(strategy.id)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_STRATEGY, 'strategy.id must be a non-empty string (content-derived, §44)'));
+  }
+  strategyFieldErrors(strategy, errors);
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 8. CorrectionPlan (spec §10) -------------------------------------------
+// The executable correction proposal: session-bound, diagnosis-backed,
+// strategy-typed, with explicit pre/postconditions. Still plain data — the
+// Transaction integration (§11/§12) happens in the execution checkpoints.
+
+const PLAN_CONTENT_KEYS = Object.freeze(['sessionId', 'diagnosis', 'strategy', 'commands', 'expectedImprovement', 'riskAssessment', 'preconditions', 'postconditions']);
+
+export function createCorrectionPlan(content){
+  if (!isPlainObject(content)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, 'createCorrectionPlan requires a plain-object content record');
+  }
+  const fnPath = findFunctionPath(content, 'content');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, `plan content must be plain data; function value at ${fnPath}`);
+  for (const required of PLAN_CONTENT_KEYS){
+    if (!Object.prototype.hasOwnProperty.call(content, required) || content[required] === undefined){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_PLAN, `createCorrectionPlan requires '${required}' explicitly (deterministic construction, no hidden defaults)`, { field: required });
+    }
+  }
+  const p = plainCopy(content);
+  const errors = [];
+  if (!isNonEmptyString(p.sessionId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.sessionId must be a non-empty string naming the owning CorrectionLoopSession (§10)'));
+  }
+  if (!isPlainObject(p.diagnosis) || !validateCorrectionDiagnosis(p.diagnosis).valid){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.diagnosis must be a valid CorrectionDiagnosis (§8/§10)'));
+  }
+  if (!isPlainObject(p.strategy) || !validateCorrectionStrategy(p.strategy).valid){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.strategy must be a valid CorrectionStrategy (§9/§10)'));
+  }
+  plainObjectArrayErrors(p.commands, 'plan.commands', errors, CorrectionErrorCodes.INVALID_PLAN);
+  if (!isPlainObject(p.expectedImprovement)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.expectedImprovement must be a plain object (§10)'));
+  }
+  if (!isPlainObject(p.riskAssessment)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.riskAssessment must be a plain object (§10)'));
+  }
+  plainObjectArrayErrors(p.preconditions, 'plan.preconditions', errors, CorrectionErrorCodes.INVALID_PLAN, { allowEmpty: true });
+  plainObjectArrayErrors(p.postconditions, 'plan.postconditions', errors, CorrectionErrorCodes.INVALID_PLAN, { allowEmpty: true });
+  if (errors.length > 0) throw new CorrectionError(errors[0].code, errors[0].message, errors);
+  return deepFreeze({ id: contentId('cplan-', p), ...p });
+}
+
+export function validateCorrectionPlan(plan){
+  const errors = [];
+  if (!isPlainObject(plan)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_PLAN, 'CorrectionPlan must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(plan, 'plan');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_PLAN, `plan must be plain data; function value at ${fnPath}`)] };
+  for (const key of ['id', ...PLAN_CONTENT_KEYS]){
+    if (!Object.prototype.hasOwnProperty.call(plan, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, `plan.${key} is a mandatory §10 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isNonEmptyString(plan.id)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.id must be a non-empty string (content-derived, §44)'));
+  }
+  if (!isNonEmptyString(plan.sessionId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.sessionId must be a non-empty string naming the owning CorrectionLoopSession (§10)'));
+  }
+  if (!isPlainObject(plan.diagnosis) || !validateCorrectionDiagnosis(plan.diagnosis).valid){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.diagnosis must be a valid CorrectionDiagnosis (§8/§10)'));
+  }
+  if (!isPlainObject(plan.strategy) || !validateCorrectionStrategy(plan.strategy).valid){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.strategy must be a valid CorrectionStrategy (§9/§10)'));
+  }
+  plainObjectArrayErrors(plan.commands, 'plan.commands', errors, CorrectionErrorCodes.INVALID_PLAN);
+  if (!isPlainObject(plan.expectedImprovement)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.expectedImprovement must be a plain object (§10)'));
+  }
+  if (!isPlainObject(plan.riskAssessment)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_PLAN, 'plan.riskAssessment must be a plain object (§10)'));
+  }
+  plainObjectArrayErrors(plan.preconditions, 'plan.preconditions', errors, CorrectionErrorCodes.INVALID_PLAN, { allowEmpty: true });
+  plainObjectArrayErrors(plan.postconditions, 'plan.postconditions', errors, CorrectionErrorCodes.INVALID_PLAN, { allowEmpty: true });
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 9. CorrectionAttempt (spec §6) -----------------------------------------
+// One independent, auditable correction try: its own target, its own plan,
+// its own transaction (§6/§12 — the transaction itself is wired by the
+// execution checkpoints through the EXISTING transaction.js API).
+
+const ATTEMPT_CONTENT_KEYS = Object.freeze(['iteration', 'target', 'plan', 'transactionId', 'beforeEvaluation', 'status']);
+
+export function createCorrectionAttempt(content){
+  if (!isPlainObject(content)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'createCorrectionAttempt requires a plain-object content record');
+  }
+  const fnPath = findFunctionPath(content, 'content');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, `attempt content must be plain data; function value at ${fnPath}`);
+  for (const required of ATTEMPT_CONTENT_KEYS){
+    if (!Object.prototype.hasOwnProperty.call(content, required) || content[required] === undefined){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, `createCorrectionAttempt requires '${required}' explicitly (deterministic construction, no hidden defaults)`, { field: required });
+    }
+  }
+  const a = plainCopy(content);
+  const errors = [];
+  attemptFieldErrors(a, errors);
+  if (errors.length > 0) throw new CorrectionError(errors[0].code, errors[0].message, errors);
+  if (a.afterEvaluation !== undefined && (!isPlainObject(a.afterEvaluation) || findFunctionPath(a.afterEvaluation, 'afterEvaluation'))){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.afterEvaluation must be undefined or a plain-data record (§6)');
+  }
+  if (a.delta !== undefined && (!isPlainObject(a.delta) || findFunctionPath(a.delta, 'delta'))){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.delta must be undefined or a plain-data EvaluationDelta record (§6/§13)');
+  }
+  return deepFreeze({ id: contentId('attempt-', a), ...a });
+}
+
+function attemptFieldErrors(a, errors){
+  if (!isInteger(a.iteration) || a.iteration < 0){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.iteration must be an integer >= 0 (§6)'));
+  }
+  if (!isPlainObject(a.target) || !validateCorrectionTarget(a.target).valid){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.target must be a valid CorrectionTarget (§7/§6)'));
+  }
+  if (!isPlainObject(a.plan) || !validateCorrectionPlan(a.plan).valid){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.plan must be a valid CorrectionPlan (§10/§6)'));
+  }
+  if (!isNonEmptyString(a.transactionId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.transactionId must be a non-empty string naming the attempt\'s INDEPENDENT transaction (§6/§12)'));
+  }
+  if (!isPlainObject(a.beforeEvaluation) || findFunctionPath(a.beforeEvaluation, 'beforeEvaluation')){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.beforeEvaluation must be a plain-data evaluation record (§6)'));
+  }
+  if (!CORRECTION_ATTEMPT_STATUSES.includes(a.status)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.status must be one of the §6 statuses', { value: a.status }));
+  }
+}
+
+export function validateCorrectionAttempt(attempt){
+  const errors = [];
+  if (!isPlainObject(attempt)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'CorrectionAttempt must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(attempt, 'attempt');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_ATTEMPT, `attempt must be plain data; function value at ${fnPath}`)] };
+  for (const key of ['id', ...ATTEMPT_CONTENT_KEYS]){
+    if (!Object.prototype.hasOwnProperty.call(attempt, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, `attempt.${key} is a mandatory §6 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isNonEmptyString(attempt.id)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.id must be a non-empty string (content-derived, §44)'));
+  }
+  attemptFieldErrors(attempt, errors);
+  if (attempt.afterEvaluation !== undefined && (!isPlainObject(attempt.afterEvaluation) || findFunctionPath(attempt.afterEvaluation, 'afterEvaluation'))){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.afterEvaluation must be undefined or a plain-data record (§6)'));
+  }
+  if (attempt.delta !== undefined && (!isPlainObject(attempt.delta) || findFunctionPath(attempt.delta, 'delta'))){
+    errors.push(createError(CorrectionErrorCodes.INVALID_ATTEMPT, 'attempt.delta must be undefined or a plain-data EvaluationDelta record (§6/§13)'));
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 10. CorrectionLoopSession (spec §4/§12) --------------------------------
+// Session-local iteration metadata. The canonical HistoryManager remains
+// LINEAR (invariant 13, §12/§47): the session NEVER changes history
+// topology — it only carries the iteration trail.
+
+const SESSION_CONTENT_KEYS = Object.freeze(['rootIntentId', 'rootTransactionId', 'maxIterations', 'initialEvaluation']);
+
+export function createCorrectionLoopSession(content){
+  if (!isPlainObject(content)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, 'createCorrectionLoopSession requires a plain-object content record');
+  }
+  const fnPath = findFunctionPath(content, 'content');
+  if (fnPath) throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, `session content must be plain data; function value at ${fnPath}`);
+  for (const required of SESSION_CONTENT_KEYS){
+    if (!Object.prototype.hasOwnProperty.call(content, required) || content[required] === undefined){
+      throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, `createCorrectionLoopSession requires '${required}' explicitly (deterministic construction, no hidden defaults)`, { field: required });
+    }
+  }
+  const src = plainCopy(content);
+  const errors = [];
+  if (!isNonEmptyString(src.rootIntentId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.rootIntentId must be a non-empty string (§4)'));
+  }
+  if (!isNonEmptyString(src.rootTransactionId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.rootTransactionId must be a non-empty string (§4; the §12 prose calls it parentTransactionId — see module header disclosure 1)'));
+  }
+  if (!isInteger(src.maxIterations) || src.maxIterations < 1){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.maxIterations must be an integer >= 1 (§4/§18 loop safety)'));
+  }
+  if (!isPlainObject(src.initialEvaluation) || findFunctionPath(src.initialEvaluation, 'initialEvaluation')){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.initialEvaluation must be a plain-data evaluation record (§4)'));
+  }
+  if (src.currentEvaluation !== undefined && (!isPlainObject(src.currentEvaluation) || findFunctionPath(src.currentEvaluation, 'currentEvaluation'))){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.currentEvaluation must be undefined (defaults to initialEvaluation) or a plain-data evaluation record (§4)'));
+  }
+  if (errors.length > 0) throw new CorrectionError(errors[0].code, errors[0].message, errors);
+  const initialEvaluation = src.initialEvaluation;
+  const session = {
+    id: null, // hashed over the INITIAL content below; identity is transition-invariant
+    rootIntentId: src.rootIntentId,
+    rootTransactionId: src.rootTransactionId,
+    iteration: 0,
+    maxIterations: src.maxIterations,
+    state: 'IDLE',
+    initialEvaluation,
+    currentEvaluation: src.currentEvaluation !== undefined ? src.currentEvaluation : initialEvaluation,
+    bestEvaluation: undefined,
+    corrections: [],
+    visitedStates: ['IDLE'],
+    terminationReason: undefined
+  };
+  session.id = contentId('loop-', {
+    rootIntentId: session.rootIntentId,
+    rootTransactionId: session.rootTransactionId,
+    maxIterations: session.maxIterations,
+    initialEvaluation: session.initialEvaluation
+  });
+  return deepFreeze(session);
+}
+
+export function validateCorrectionLoopSession(session){
+  const errors = [];
+  if (!isPlainObject(session)){
+    return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_SESSION, 'CorrectionLoopSession must be a plain object')] };
+  }
+  const fnPath = findFunctionPath(session, 'session');
+  if (fnPath) return { valid: false, errors: [createError(CorrectionErrorCodes.INVALID_SESSION, `session must be plain data; function value at ${fnPath}`)] };
+  for (const key of ['id', 'rootIntentId', 'rootTransactionId', 'iteration', 'maxIterations', 'state', 'initialEvaluation', 'currentEvaluation', 'corrections', 'visitedStates']){
+    if (!Object.prototype.hasOwnProperty.call(session, key)){
+      errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, `session.${key} is a mandatory §4 field`, { field: key }));
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+  if (!isNonEmptyString(session.id)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.id must be a non-empty string (content-derived, §44)'));
+  }
+  if (!isNonEmptyString(session.rootIntentId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.rootIntentId must be a non-empty string (§4)'));
+  }
+  if (!isNonEmptyString(session.rootTransactionId)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.rootTransactionId must be a non-empty string (§4)'));
+  }
+  if (!isInteger(session.iteration) || session.iteration < 0){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.iteration must be an integer >= 0 (§4)'));
+  }
+  if (!isInteger(session.maxIterations) || session.maxIterations < 1){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.maxIterations must be an integer >= 1 (§4/§18)'));
+  }
+  if (!CORRECTION_LOOP_STATES.includes(session.state)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.state must be a §5 CorrectionLoopState', { value: session.state }));
+  }
+  if (!isPlainObject(session.initialEvaluation) || findFunctionPath(session.initialEvaluation, 'initialEvaluation')){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.initialEvaluation must be a plain-data evaluation record (§4)'));
+  }
+  if (!isPlainObject(session.currentEvaluation) || findFunctionPath(session.currentEvaluation, 'currentEvaluation')){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.currentEvaluation must be a plain-data evaluation record (§4)'));
+  }
+  if (session.bestEvaluation !== undefined && (!isPlainObject(session.bestEvaluation) || findFunctionPath(session.bestEvaluation, 'bestEvaluation'))){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.bestEvaluation must be undefined or a plain-data evaluation record (§4/§16)'));
+  }
+  if (!Array.isArray(session.corrections)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.corrections must be an array of CorrectionAttempt records (§4/§6)'));
+  } else {
+    for (let i = 0; i < session.corrections.length; i++){
+      const check = validateCorrectionAttempt(session.corrections[i]);
+      if (!check.valid){
+        for (const e of check.errors) errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, `session.corrections[${i}]: ${e.message}`, e.details));
+      }
+    }
+  }
+  if (!Array.isArray(session.visitedStates) || session.visitedStates.length === 0 || !session.visitedStates.every(s => CORRECTION_LOOP_STATES.includes(s))){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.visitedStates must be a non-empty array of §5 state names (§4)'));
+  } else if (session.visitedStates[0] !== 'IDLE'){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.visitedStates must open with IDLE (§3: the loop starts at IDLE)'));
+  }
+  if (session.terminationReason !== undefined && !CORRECTION_TERMINATION_REASONS.includes(session.terminationReason)){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.terminationReason must be undefined or a §50 CorrectionTerminationReason', { value: session.terminationReason }));
+  }
+  // Termination discipline (module-header disclosure 5): state TERMINATED
+  // IFF a §50 reason is carried — enforced in BOTH directions (the §12
+  // gate-5 discipline of evaluation.js applied to the loop lifecycle).
+  const terminated = session.state === 'TERMINATED';
+  const hasReason = session.terminationReason !== undefined;
+  if (terminated && !hasReason){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.state TERMINATED requires a §50 terminationReason — terminate through terminateSession(session, reason)'));
+  }
+  if (!terminated && hasReason){
+    errors.push(createError(CorrectionErrorCodes.INVALID_SESSION, 'session.terminationReason requires state TERMINATED (§4/§50)'));
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+// ---- 11. State machine (spec §3/§5) -----------------------------------------
+// The §3 graph over §5 state names (module-header disclosures 2-4). Every
+// edge below is either a literal §3 edge or one of the five disclosed
+// spec-derived completion edges. TERMINATED is absorbing.
+
+export const CORRECTION_LOOP_TRANSITIONS = Object.freeze({
+  IDLE:          Object.freeze(['PLANNING']),
+  PLANNING:      Object.freeze(['EXECUTING']),
+  EXECUTING:     Object.freeze(['EVALUATING']),
+  EVALUATING:    Object.freeze(['DIAGNOSING', 'VERIFIED']),                    // DIAGNOSING = §3 (UNRESOLVED); VERIFIED = §17 clean pass
+  DIAGNOSING:    Object.freeze(['CORRECTING']),
+  CORRECTING:    Object.freeze(['RE_EXECUTING', 'ROLLING_BACK']),              // ROLLING_BACK = §3 (CORRECTION_FAILED)
+  RE_EXECUTING:  Object.freeze(['RE_EVALUATING']),
+  RE_EVALUATING: Object.freeze(['VERIFIED', 'ROLLING_BACK', 'TERMINATED', 'DIAGNOSING']), // §3 (VERIFIED / REGRESSION / NO_PROGRESS) + cycle
+  ROLLING_BACK:  Object.freeze(['DIAGNOSING', 'TERMINATED']),                  // §69 retry + §50 give-up
+  VERIFIED:      Object.freeze(['TERMINATED']),                                // §4/§50 formal close
+  TERMINATED:    Object.freeze([])
+});
+
+// [CHECKPOINT-A-KILLSITE-1] transition legality lookup
+export function canTransition(from, to){
+  const allowed = CORRECTION_LOOP_TRANSITIONS[from] || [];
+  return allowed.includes(to);
+}
+
+// [CHECKPOINT-A-KILLSITE-2] visitedStates append
+export function transitionSession(session, to){
+  const check = validateCorrectionLoopSession(session);
+  if (!check.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, 'transitionSession requires a valid CorrectionLoopSession (§4)', check.errors);
+  }
+  if (!isNonEmptyString(to) || !CORRECTION_LOOP_STATES.includes(to)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, `transitionSession target must be a §5 CorrectionLoopState, got ${JSON.stringify(to)}`, { target: to });
+  }
+  if (to === 'TERMINATED'){
+    // Module-header disclosure 5: the reasonless direct jump is refused even
+    // where the §3 edge exists — a TERMINATED session MUST carry its §50
+    // reason, so the sanctioned path is terminateSession(session, reason).
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TERMINATION, 'direct transition to TERMINATED is refused: a §50 terminationReason is mandatory — use terminateSession(session, reason)', { from: session.state });
+  }
+  if (!canTransition(session.state, to)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, `illegal state transition ${session.state} -> ${to} (§3/§5): the Correction Loop state machine refuses shortcuts, backwards jumps, and skipped phases`, { from: session.state, to });
+  }
+  const nextTrail = Object.freeze([...session.visitedStates, to]);
+  return deepFreeze({ ...session, state: to, visitedStates: [...nextTrail] });
+}
+
+// [CHECKPOINT-A-KILLSITE-3] termination reason discipline
+export function terminateSession(session, reason){
+  const check = validateCorrectionLoopSession(session);
+  if (!check.valid){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_SESSION, 'terminateSession requires a valid CorrectionLoopSession (§4)', check.errors);
+  }
+  if (session.state === 'TERMINATED'){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, 'terminateSession: the session is already TERMINATED (absorbing state, §5)', { from: session.state });
+  }
+  if (!isNonEmptyString(reason) || !CORRECTION_TERMINATION_REASONS.includes(reason)){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TERMINATION, `terminateSession reason must be a §50 CorrectionTerminationReason, got ${JSON.stringify(reason)}`, { reason });
+  }
+  // §53 user-cancellation overlay (module-header disclosure 4): the USER may
+  // cancel at ANY iteration — USER_CANCELLED is legal from every
+  // non-terminated state. Every OTHER §50 reason is engine-driven and still
+  // requires a §3/§5 map edge into TERMINATED.
+  if (reason !== 'USER_CANCELLED' && !canTransition(session.state, 'TERMINATED')){
+    throw new CorrectionError(CorrectionErrorCodes.INVALID_TRANSITION, `termination with reason ${reason} is illegal from state ${session.state} (§3): no engine-driven edge into TERMINATED`, { from: session.state, reason });
+  }
+  const nextTrail = Object.freeze([...session.visitedStates, 'TERMINATED']);
+  return deepFreeze({ ...session, state: 'TERMINATED', terminationReason: reason, visitedStates: [...nextTrail] });
+}

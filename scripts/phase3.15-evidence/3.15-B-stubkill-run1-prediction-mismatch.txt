@@ -1,0 +1,15 @@
+pre-battery pristine match: 5922691ad4e3041d3afac13dc1ec604bcedb409e4b94a6eb126c05231c966517
+KILL-MISMATCH KILL-B1 (mapping returns UNKNOWN):
+--- /tmp/predicted-b.txt	2026-09-22 06:38:08.122150392 +0000
++++ /tmp/failed-b.txt	2026-09-22 06:38:08.121150387 +0000
+@@ -1,5 +1,7 @@
+ B-11
+ B-16
++B-21
++B-22
+ B-23
+ B-25
+ B-4
+KILL-OK KILL-B2 (priority constant 1): failed set == prediction (4 tests), exit=1
+post-restore: exit=0, sha=5922691ad4e3041d3afac13dc1ec604bcedb409e4b94a6eb126c05231c966517 (pristine match verified)
+STUBKILL PROOF: FAIL (1 mismatches)

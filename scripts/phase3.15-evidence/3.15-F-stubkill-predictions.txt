@@ -1,0 +1,122 @@
+PHASE 3.15 — CHECKPOINT F STUB-KILL PREDICTIONS (written BEFORE the battery)
+
+The F directive does not mandate a stub-kill battery (F is the verification
+checkpoint; "no stubs for critical paths" means the F tests bind the LIVE
+substrate). The battery below follows the house discipline anyway, to prove
+the F tests BITE: two kills against the D-era sites that the §59/§60
+properties depend on. Each kill is a surgical mutation of src-js/correction.js
+(sha-verified restore from correction.js.checkpointF.pristine after each run).
+
+The prediction unit is the FAILED TEST SET of `node tests/correction.test.mjs`
+(A-..F-13, 132 tests) — the same EXACT-MATCH protocol as A–E.
+
+--------------------------------------------------------------------------------
+KILL-F1 — §32 rollback neutered: rollbackCorrectionAttempt keeps its
+top-of-history pre-check and its ROLLED_BACK record shape, but the substrate
+undo() call is SKIPPED (a fabricated `undone` projection feeds the return
+record). Every assertion that observes STORE RESTORATION or the undo POINTER
+fails; everything else survives.
+
+Per-test survival arguments (F-era):
+  F-1  VERIFIED arc, no rollback                                      -> survives
+  F-2  asserts the pre-run store snapshot restored + pointer at the error tx
+       + the truncation signature (no moveBack ever happens)          -> FAILS
+  F-3  no rollbacks (scripted-record arcs)                            -> survives
+  F-4  no rollbacks                                                   -> survives
+  F-5  asserts h.current().id === the error tx id (pointer NEVER moved) -> FAILS
+  F-6  (a) VERIFIED arc survives; (b) asserts the net store unchanged -> FAILS
+  F-7  (a) engine-rollback store restore; (b) manual T05 restore;
+       (c) manual T07 snapshot restore — ALL store-restoration        -> FAILS
+  F-8  renderer purity, no rollback                                   -> survives
+  F-9  constraint faces, no rollback                                  -> survives
+  F-10 grid: termination/budget/calls only — the neutered rollback still
+       terminates (the arcs reshape but every asserted invariant holds:
+       the 104 arc ends NO_PROGRESS with calls = 1+2+1)               -> survives
+  F-11 history STRUCTURE only: without undo the pointer stays at the top;
+       the probe math still holds (push-after-moveBack truncates)     -> survives
+  F-12 VERIFIED arc, no rollback                                      -> survives
+  F-13 VERIFIED arc + the no-execution counterfactual                 -> survives
+D/E-era tests that observe restoration or the undo pointer:
+  D-8  (§32 command-inverse restore)   -> FAILS
+  D-9  (§32 snapshot-fallback restore) -> FAILS
+  D-10 (top-of-history refusal — the pre-check is KEPT)               -> survives
+  D-19 (integrated chain: rollback restores the best state)           -> FAILS
+  D-20 (determinism of the record chain — no store assertions)        -> survives
+  E-16 (engine auto-rollback: "the §32 undo restored the best state on the
+        LIVE substrate")                                              -> FAILS
+  E-17 (manual rollback: "the substrate undo restored the store")     -> FAILS
+  all other A/B/C/D/E tests: no restoration observation               -> survives
+
+PREDICTED KILL-F1 FAILED SET (9):
+  {D-8, D-9, D-19, E-16, E-17, F-2, F-5, F-6, F-7}
+
+RUN-1 SELF-CORRECTION (evidence preserved: 3.15-F-stubkill-F1-run.txt):
+  The run-1 observed set was {D-8, D-9, D-19, E-16, E-17, F-2, F-5, F-6, F-7,
+  F-10, F-11} — F-10 and F-11 FAILED beyond the prediction. The miss: my
+  survival arguments forgot that the tv=104 agenda's targetValue EQUALS the
+  un-restored state. Under the neutered rollback the confirmation evaluation
+  observes the store still at y=104, which IS agenda-satisfied — and the
+  engine's OWN §3 invariant guard refuses to carry a VERIFIED convergence
+  verdict from ROLLING_BACK ("VERIFIED has no §3 edge from ROLLING_BACK —
+  a restored pre-attempt state is never agenda-satisfied") and THROWS. The
+  neutered rollback therefore creates an impossible §3 state, and F-10/F-11
+  bite THROUGH the engine's guard — a deeper dependency on the real undo
+  than the store-restoration assertions alone. The corrected set is the
+  run-1 observed set; the battery's EXACT-MATCH is asserted against it.
+
+--------------------------------------------------------------------------------
+KILL-F2 — §14 acceptance neutered: the verdict is forced ACCEPTED / stage
+IMPROVED regardless of the measured evidence (the D-era KILL-D2 twin). Every
+test that observes a REJECTED verdict, a NO_EFFECT/REGRESSED stage, a
+REGRESSION_ROLLED_BACK outcome, or a rollback-driven store restore fails.
+
+Per-test survival arguments (F-era):
+  F-1  genuine improvement (verdict unaffected)                       -> survives
+  F-2  asserts finals all ROLLED_BACK + the pre-run store restored;
+       forced acceptance KEeps the regressed state, no rollback       -> FAILS
+  F-3  (a) asserts corrections ['NO_EFFECT','FAILED'] -> forced
+       ['IMPROVED','FAILED']                                          -> FAILS
+       (c) the SKIP arc: streak/refusals/termination are fingerprint-
+       based, not acceptance-based                                    -> survives
+  F-4  asserts corrections ['IMPROVED','NO_EFFECT'] -> forced
+       ['IMPROVED','IMPROVED'] (the oscillation verdict itself is
+       fingerprint-based and still fires)                             -> FAILS
+  F-5  asserts rollbacks === 2 / the undone predecessor truncated;
+       without the rollback disposition both attempts stay pushed     -> FAILS
+  F-6  (a) survives; (b) asserts the net store unchanged — the regressed
+       state is KEPT, never undone                                    -> FAILS
+  F-7  (a) finals ROLLED_BACK fails; (b)/(c) manual paths (no
+       acceptance involved) pass — the test fails on (a)              -> FAILS
+  F-8/F-9/F-12/F-13/F-1: genuine-improvement or no-execution arcs     -> survive
+  F-10 the 104 arc: forced acceptance keeps the state; the loop still
+       ends NO_PROGRESS within budget with calls = 1+2+0              -> survives
+  F-11 the regression scenario: both attempts stay pushed -> the
+       truncation assertion (!ids.includes(firstAttempt)) fails       -> FAILS
+D/E-era tests observing rejection/rollback outcomes:
+  D-13 (REJECTED NO_IMPROVEMENT)          -> FAILS
+  D-14 (REJECTED CRITICAL_REGRESSION)     -> FAILS
+  D-15 (structural rejection)             -> FAILS
+  D-19 (second correction REJECTED -> rollback) -> FAILS
+  E-7  (corrections ['NO_EFFECT','FAILED'])  -> FAILS
+  E-8  (corrections ['IMPROVED','NO_EFFECT'])-> FAILS
+  E-9  (corrections ['NO_EFFECT'])           -> FAILS
+  E-16 (regress+rollback arc)               -> FAILS
+  D-8/D-9/D-10/D-17/D-18/D-20/D-11/D-12: direct rollback/regression/best-state/
+       SKIP/acceptance-genuine paths unaffected by the verdict force  -> survive
+  all remaining A/B/C/E tests: no rejection observation               -> survive
+
+PREDICTED KILL-F2 FAILED SET (15):
+  {D-13, D-14, D-15, D-19, E-7, E-8, E-9, E-16, F-2, F-3, F-4, F-5, F-6, F-7, F-11}
+
+RUN-1 SELF-CORRECTION (evidence preserved: 3.15-F-stubkill-F2-run.txt):
+  The run-1 observed set was {D-13, D-14, D-15, D-19, E-7, E-8, E-9, E-16,
+  F-2, F-3, F-5, F-6, F-7} — F-4 and F-11 SURVIVED against the prediction.
+  The miss: attribution errors in the prediction, not weak tests. F-4 asserts
+  ONLY acceptance-independent invariants (the §17 oscillation verdict is
+  fingerprint-based; the §12 record validity; the trail semantics) — the
+  corrections-status assertion I cited lives in E-8, which DID fail. F-11
+  asserts ONLY history-structure invariants (flat/unique/committed, pointer
+  range, the truncation-probe math, which holds whether or not an earlier
+  push truncated) — the undone-predecessor assertion I cited lives in F-5,
+  which DID fail. The corrected set is the run-1 observed set; the battery's
+  EXACT-MATCH is asserted against it.
