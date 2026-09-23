@@ -1,0 +1,8 @@
+tests/transaction.test.mjs                 Tests: 32 total, 32 passed, 0 failed [OK]
+COUNTED SUITE: 896 passed / 0 failed (of 896)
+--- standalone gates ---
+gate PASS: tests/geometry.test.js
+gate PASS: tests/architecture.test.mjs
+gate PASS: tests/architecture-phase3.04.mjs
+gate PASS: tests/run-js.js
+gate PASS: src-js/run.js (dsl vertical slice)

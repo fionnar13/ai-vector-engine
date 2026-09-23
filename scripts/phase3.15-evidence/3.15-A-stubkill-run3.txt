@@ -1,0 +1,51 @@
+✓ A-1: §5 state vocabulary — exactly the 11 CorrectionLoopState values, frozen (spec §5)
+✓ A-2: §50 termination vocabulary — exactly the 9 CorrectionTerminationReason values, frozen
+✓ A-3: §6 attempt status vocabulary — exactly the 7 CorrectionAttempt.status values, frozen
+✓ A-4: §7 target category + severity vocabularies — exactly 11 categories and 4 severities, frozen
+✓ A-5: §8 root-cause + §9 risk vocabularies — exactly 10 root causes and 3 risks, frozen
+✓ A-6: createCorrectionLoopPolicy() — the §18 implementation defaults are EXACT, deep-frozen, and validator-accepted
+✓ A-7: createCorrectionLoopPolicy(partial) merges over defaults; validator enforces types and bounds
+✓ A-8: CorrectionTarget — deterministic content-derived id, deep-frozen, JSON round-trip lossless, validator accepts
+✓ A-9: CorrectionTarget validation — mandatory fields, enums, confidence range, plain-data-only
+✓ A-10: CorrectionDiagnosis — deterministic id, deep-frozen, round-trip, all 10 root causes constructible
+✓ A-11: CorrectionDiagnosis validation — rootCause enum, confidence range, mandatory targetId, plain-data-only
+✓ A-12: CorrectionStrategy — deterministic id, deep-frozen, round-trip, all 3 risks constructible
+✓ A-13: CorrectionStrategy validation — risk enum, boolean reversible, plain-object commands, mandatory fields
+✓ A-14: CorrectionPlan — embeds valid diagnosis + strategy, deterministic id, deep-frozen, round-trip, validator accepts
+✓ A-15: CorrectionPlan validation — embedded records validated, mandatory sections, plain-data-only
+✓ A-16: CorrectionAttempt — embeds valid target + plan, deterministic id, deep-frozen, round-trip, all 7 statuses constructible
+✓ A-17: CorrectionAttempt validation — status enum, iteration integer, transactionId, plain-data-only, embedded records
+✓ A-18: createCorrectionLoopSession — §4 defaults, deterministic id, deep-frozen, round-trip, validator accepts
+✗ A-19: session validation — mandatory fields, bounds, trail start, TERMINATED⟺terminationReason in BOTH directions: TERMINATED without terminationReason rejected
+Error: TERMINATED without terminationReason rejected
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:62:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:400:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:61:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:389:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ A-20: CORRECTION_LOOP_TRANSITIONS — the §3 graph is present verbatim, frozen, and every endpoint is a §5 state
+✓ A-21: canTransition — §3 happy chain, §3 failure paths, and the five disclosed completion edges all legal
+✓ A-22: canTransition — illegal edges are false (IDLE shortcuts, backwards jumps, absorbing TERMINATED)
+✓ A-23: transitionSession — the full §3 happy chain from IDLE to VERIFIED, trail grows exactly, iteration untouched
+✓ A-24: transitionSession immutability — the input session is untouched (deep JSON compare before/after)
+✓ A-25: transitionSession rejection — illegal transitions throw CorrectionError(INVALID_TRANSITION) naming both states
+✓ A-26: transitionSession input discipline — unknown target state and invalid sessions rejected
+✓ A-27: §3 failure path — CORRECTING ->(CORRECTION_FAILED)-> ROLLING_BACK -> DIAGNOSING retry, second cycle reaches VERIFIED, trail records EVERY visit
+✓ A-28: §3 failure path — RE_EVALUATING ->(REGRESSION)-> ROLLING_BACK, then formal termination with EXECUTION_ERROR
+✓ A-29: §3 edge RE_EVALUATING->TERMINATED is a legal canTransition edge, but the reasonless direct jump is refused (INVALID_TERMINATION) — the §50 reason is mandatory
+✗ A-30: terminateSession — happy paths from RE_EVALUATING/VERIFIED/ROLLING_BACK with valid §50 reasons; invalid reasons rejected: invalid reason 'REGRESSION' refused: nothing was thrown
+Error: invalid reason 'REGRESSION' refused: nothing was thrown
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:62:38)
+    at throwsWithCode (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:68:3)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:563:5
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:61:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:553:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ A-31: TERMINATED is absorbing and illegal sources refuse termination — but §53 USER_CANCELLED is legal from ANY active state (any iteration)
+✓ A-32: determinism (§44) — two identical session chains produce byte-identical JSON; id stability across the chain
+
+Tests: 32 total, 30 passed, 2 failed

@@ -1,0 +1,83 @@
+# PHASE 3.15 — CHECKPOINT E — STUB-KILL PREDICTIONS (written BEFORE the battery)
+# Directive: stub-kill for convergence detection and mode dispatch.
+# Method: each kill neuters ONE site in src-js/correction.js; the correction
+# suite runs; the observed failing set must EXACTLY MATCH the prediction below.
+# Self-review was performed on this file before the battery ran (the E-3/E-9/
+# E-12/E-14/E-15/E-17/E-20 survival arguments are written out; the E-6 trace
+# was re-walked to confirm the SKIP-exhaust termination precedes the run guard).
+
+# ---------------------------------------------------------------------------
+# KILL-E1 — §17 convergence detection neutered:
+#   detectCorrectionConvergence body replaced by an unconditional
+#   { kind: 'CONTINUE', evidence: {} } return (no validation, no precedence).
+#   Every convergence-driven termination disappears; exhaust-driven give-ups
+#   (formation refusals / SKIP exhaustion / NO_CAPABILITY / hard constraints)
+#   still terminate through the machine; the run() guard is the last resort.
+#
+# Predicted FAILING set (14):
+#   E-1   (the §17 precedence beats: every expected verdict now CONTINUE; the
+#          validation-throw beats also die — the stub validates nothing)
+#   E-4   (start pre-verified: RUNNING instead of TERMINATED/VERIFIED)
+#   E-5   (iterate 2 formation throws: satisfied agenda + CONTINUE verdict)
+#   E-6   (runs past the budget to a SKIP-exhaust NO_PROGRESS at attempt 5:
+#          reason/attempt-count/trail/call-count/history all diverge)
+#   E-7   (T10/T11 ping-pong until the run() guard throws at iterate 8)
+#   E-8   (no oscillation verdict: the A/B script ping-pongs to a guard throw)
+#   E-10  (beat (a)'s run throws on the satisfied-agenda formation)
+#   E-11  (approval converges CONTINUE -> RUNNING, never TERMINATED/VERIFIED)
+#   E-13  (beat (b): a verifying single step stays STEPPED-less RUNNING — the
+#          step never terminates; the beat-(a) STEPPED assertions hold but the
+#          beat-(b) TERMINATED assertion fails)
+#   E-16  (rollback retries never converge: streak builds but CONTINUE wins
+#          every cycle until the run() guard throws)
+#   E-18  (the property seeds assert the disclosed convergence outcomes)
+#   E-19  (the E-5 scenario run throws on the satisfied-agenda formation)
+#   E-21  (cycle 2 completes; iterate 3 formation throws on the satisfied agenda)
+#   E-22  (beat (b): the live pre-verified start returns RUNNING, not TERMINATED)
+#
+# Predicted PASSING set (8) — with the survival argument:
+#   E-2   (request validation: pure envelope, no convergence)
+#   E-3   (start happy: asserts RUNNING + STARTED report only)
+#   E-9   (SKIP-exhaust give-up is EXHAUSTION-driven (lastBlocker SKIP ->
+#          NO_PROGRESS mapping), not convergence-driven; the SKIP streak bump
+#          happens in the give-up path)
+#   E-12  (GUIDED rejection exhausts the cursor — exhaustion-driven UNFIXABLE)
+#   E-14  (GUIDED wait determinism: propose + idempotent waits, no convergence)
+#   E-15  (terminate: USER_CANCELLED overlay + machine refusals, no convergence)
+#   E-17  (manual rollback: STEPPED still reached (stepPause is §26, not §17);
+#          the rollback op and its refusals never touch convergence)
+#   E-20  (NO_CAPABILITY / hard-constraint exhaustions — exhaustion-driven)
+#
+# PREDICTION: KILL-E1 failing set == {E-1, E-4, E-5, E-6, E-7, E-8, E-10,
+#             E-11, E-13, E-16, E-18, E-19, E-21, E-22} (14 of 22)
+
+# ---------------------------------------------------------------------------
+# KILL-E2 — §26 mode dispatch neutered (every mode dispatched as AUTO):
+#   engineRun consumes the AUTO row for every mode (cyclesPerRun null ->
+#   run-to-termination); engineContinue's GUIDED propose branch never fires
+#   (every mode executes immediately); engineConverge's SINGLE_STEP pause
+#   never fires; engineIterate's step-budget refusal is skipped.
+#
+# Predicted FAILING set (6):
+#   E-11  (GUIDED run executes immediately -> TERMINATED/VERIFIED, never
+#          AWAITING_APPROVAL; no proposal ever parks)
+#   E-12  (no proposal to reject: the loop executes and VERIFIES instead of
+#          the host-rejection UNFIXABLE)
+#   E-13  (beat (a): the single step runs on as AUTO to a SKIP-exhaust
+#          NO_PROGRESS instead of STEPPED)
+#   E-14  (r1 executes and terminates instead of proposing; the whole
+#          deterministic-wait chain never exists)
+#   E-15  (beat (a)'s "proposed" state is already TERMINATED under the kill ->
+#          terminate throws already-terminated)
+#   E-17  (the SINGLE_STEP step runs on as AUTO and terminates NO_PROGRESS;
+#          the STEPPED precondition never materializes)
+#
+# Predicted PASSING set (16): E-1..E-10 (AUTO scenarios assert AUTO semantics,
+#   and E-1's dispatch-TABLE assertions are untouched by a consumption-side
+#   kill), E-16/E-18..E-22 (all AUTO).
+#
+# PREDICTION: KILL-E2 failing set == {E-11, E-12, E-13, E-14, E-15, E-17}
+#             (6 of 22); the two sets are DISJOINT except E-11-type overlap is
+#             absent: KILL-E1 also fails E-11 (convergence) — the sets overlap
+#             on {E-11} ONLY from the KILL-E1 side.
+# ---------------------------------------------------------------------------

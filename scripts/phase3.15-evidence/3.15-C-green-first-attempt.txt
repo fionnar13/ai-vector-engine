@@ -1,0 +1,95 @@
+✓ A-1: §5 state vocabulary — exactly the 11 CorrectionLoopState values, frozen (spec §5)
+✓ A-2: §50 termination vocabulary — exactly the 9 CorrectionTerminationReason values, frozen
+✓ A-3: §6 attempt status vocabulary — exactly the 7 CorrectionAttempt.status values, frozen
+✓ A-4: §7 target category + severity vocabularies — exactly 11 categories and 4 severities, frozen
+✓ A-5: §8 root-cause + §9 risk vocabularies — exactly 10 root causes and 3 risks, frozen
+✓ A-6: createCorrectionLoopPolicy() — the §18 implementation defaults are EXACT, deep-frozen, and validator-accepted
+✓ A-7: createCorrectionLoopPolicy(partial) merges over defaults; validator enforces types and bounds
+✓ A-8: CorrectionTarget — deterministic content-derived id, deep-frozen, JSON round-trip lossless, validator accepts
+✓ A-9: CorrectionTarget validation — mandatory fields, enums, confidence range, plain-data-only
+✓ A-10: CorrectionDiagnosis — deterministic id, deep-frozen, round-trip, all 10 root causes constructible
+✓ A-11: CorrectionDiagnosis validation — rootCause enum, confidence range, mandatory targetId, plain-data-only
+✓ A-12: CorrectionStrategy — deterministic id, deep-frozen, round-trip, all 3 risks constructible
+✓ A-13: CorrectionStrategy validation — risk enum, boolean reversible, plain-object commands, mandatory fields
+✓ A-14: CorrectionPlan — embeds valid diagnosis + strategy, deterministic id, deep-frozen, round-trip, validator accepts
+✓ A-15: CorrectionPlan validation — embedded records validated, mandatory sections, plain-data-only
+✓ A-16: CorrectionAttempt — embeds valid target + plan, deterministic id, deep-frozen, round-trip, all 7 statuses constructible
+✓ A-17: CorrectionAttempt validation — status enum, iteration integer, transactionId, plain-data-only, embedded records
+✓ A-18: createCorrectionLoopSession — §4 defaults, deterministic id, deep-frozen, round-trip, validator accepts
+✓ A-19: session validation — mandatory fields, bounds, trail start, TERMINATED⟺terminationReason in BOTH directions
+✓ A-20: CORRECTION_LOOP_TRANSITIONS — the §3 graph is present verbatim, frozen, and every endpoint is a §5 state
+✓ A-21: canTransition — §3 happy chain, §3 failure paths, and the five disclosed completion edges all legal
+✓ A-22: canTransition — illegal edges are false (IDLE shortcuts, backwards jumps, absorbing TERMINATED)
+✓ A-23: transitionSession — the full §3 happy chain from IDLE to VERIFIED, trail grows exactly, iteration untouched
+✓ A-24: transitionSession immutability — the input session is untouched (deep JSON compare before/after)
+✓ A-25: transitionSession rejection — illegal transitions throw CorrectionError(INVALID_TRANSITION) naming both states
+✓ A-26: transitionSession input discipline — unknown target state and invalid sessions rejected
+✓ A-27: §3 failure path — CORRECTING ->(CORRECTION_FAILED)-> ROLLING_BACK -> DIAGNOSING retry, second cycle reaches VERIFIED, trail records EVERY visit
+✓ A-28: §3 failure path — RE_EVALUATING ->(REGRESSION)-> ROLLING_BACK, then formal termination with EXECUTION_ERROR
+✓ A-29: §3 edge RE_EVALUATING->TERMINATED is a legal canTransition edge, but the reasonless direct jump is refused (INVALID_TERMINATION) — the §50 reason is mandatory
+✓ A-30: terminateSession — happy paths from RE_EVALUATING/VERIFIED/ROLLING_BACK with valid §50 reasons; invalid reasons rejected
+✓ A-31: TERMINATED is absorbing and illegal sources refuse termination — but §53 USER_CANCELLED is legal from ANY active state (any iteration)
+✓ A-32: determinism (§44) — two identical session chains produce byte-identical JSON; id stability across the chain
+✓ B-1: category→rootCause resolution table — exactly 11 keys covering every §7 category, frozen, values ∈ §8 causes, UNKNOWN unreachable
+✓ B-2: capability recipe table — frozen, every recipe grounded in a REGISTERED mutation tool (live registry), strictly positive confidence, reversible, scoped
+✓ B-3: grounding coverage — the seven executable causes are covered; SEMANTIC_ERROR/CONSTRAINT_VIOLATION/UNKNOWN are honest gaps whose provenance is the live registry itself
+✓ B-4: metric matcher dot-boundary discipline — prefix matches exact or dot-boundary only; attribution survives where strategy matching fails
+✓ B-5: resolveCorrectionDiagnosis RESOLVED shape (POSITION) — §8 diagnosis with a capability-grounded strategy, deep-frozen end to end
+✓ B-6: full 11-category sweep — 8 categories resolve to the mapped cause; SEMANTIC/TEXT/CONSTRAINT hit the §28 NO_CAPABILITY path with the exact record shape
+✓ B-7: resolver determinism — identical target resolves with identical diagnosis/strategy ids and byte-identical JSON (§44)
+✓ B-8: content-derived ids move with content — objectIds change moves the strategy id; confidence change moves the diagnosis id but NOT the strategy id
+✓ B-9: resolver input discipline — invalid target content is refused with INVALID_TARGET before any resolution
+✓ B-10: §28 SEMANTIC — the NO_CAPABILITY resolution is a frozen, self-describing record; the Checkpoint A diagnosis contract (non-empty strategies) stands
+✓ B-11: §28 CONSTRAINT/TEXT — NO_CAPABILITY with live-registry provenance (T19/T20 proposal-class; no text-content editor exists)
+✓ B-12: CorrectionImpact (§20) — LOCAL scope for the translate capability: no secondary objects, reversibility mirrors the strategy
+✓ B-13: CorrectionImpact (§20) — SUBTREE for hierarchy capabilities (T10) with the affected subtree roots recorded; conservative GLOBAL for unknown toolIds
+✓ B-14: CorrectionCost (§38) — deterministic integers: total = riskWeight × (commandCount + objectCount), objectCount deduped across commands
+✓ B-15: impact/cost input discipline — invalid strategy/target refused with the structure-specific codes
+✓ B-16: §19 ranking, single candidate — EXACT priority = Severity(2) × Confidence(1) × Impact(1) × Correctability(1) = 2, factors and cost attached, selected = ranked[0]
+✓ B-17: §19 ranking, multi-candidate — deterministic order with EXACT priorities (input deliberately out of priority order)
+✓ B-18: §19 ranking tie-break — equal priorities keep the diagnosis recommendation order (deterministic stability, no entropy)
+✓ B-19: §19 strictly-positive property — even the worst legal candidate ranks strictly above zero (ranking viability, module-header disclosure 7)
+✓ B-20: ranking integrity — every ranked strategy comes from the diagnosis (never invented, §28), descending monotonicity, and input discipline
+✓ B-21: §27 explainCorrectionDiagnosis — deterministic plain-data explanation (two calls byte-identical), decision DIAGNOSED, >=3 reasons, zero function values
+✓ B-22: §27 number formatting — floats render in canonical JS form inside the summary (no locale, no entropy)
+✓ B-23: §27 explainCorrectionStrategySelection — labeled factors with exact values, priority in the summary, alternatives counted
+✓ B-24: §27 selection determinism — two ranks of identical inputs produce byte-identical explanations
+✓ B-25: plural resolver — target input order preserved, frozen array, non-array input refused
+✓ C-1: T05 delta derivation — position.x/position.y metrics materialize the EXACT factory-anchored delta (§43 rule-based prediction, disclosure 19)
+✗ C-2: T07 opacity derivation — appearance.opacity-class metrics materialize the exact opacity; fill-class metrics refuse (no fabricated fill records): exact T07 opacity input: [{"kind":"UpdateAppearance","toolId":"T07","input":{"objectIds":["obj-1"]}}] !== [{"kind":"UpdateAppearance","toolId":"T07","input":{"objectIds":["obj-1"],"opacity":1}}]
+Error: exact T07 opacity input: [{"kind":"UpdateAppearance","toolId":"T07","input":{"objectIds":["obj-1"]}}] !== [{"kind":"UpdateAppearance","toolId":"T07","input":{"objectIds":["obj-1"],"opacity":1}}]
+    at deepEq (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:141:91)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:1111:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:138:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:1105:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ C-3: derivation refusals — missing targetValue, axis-less position metrics, and rule-less tools are NOT_DERIVABLE with exact missing keys (no fabricated parameters)
+✓ C-4: derivation CARRY path — schema-complete inputs pass through untouched (T10/T11 on structure.grouping); contract shape classes are enforced; input discipline
+✓ C-5: dependency scan (§41) — affected objects -> dependencies (ancestor chain) -> constraints -> semantic relationships, injected duck-typed context, input order preserved
+✓ C-6: dependency scan partial honesty — absent stages are reported unscanned (never silently "empty because checked"); input discipline
+✓ C-7: safety gate PRESERVED (§36/§37) — orthogonal hard constraint survives, soft conflict becomes a recorded trade-off, disabled constraints are invisible
+✓ C-8: safety gate REJECTED (§36) — a hard constraint on a mutated axis REJECTS with the exact §35 context; unknown hard types are conservative; appearance/z-order mutations never conflict
+✓ C-9: scope control (§40) — command references must stay inside the required set; violations name the exact command and offenders
+✓ C-10: generateCorrectionPlan READY — exact §10 plan content: materialized commands, expectedImprovement, riskAssessment, pre/postconditions (§43 rule-based), deep-frozen
+✓ C-11: generator constraint evidence — preserved hard ids land in pre/postconditions; soft trade-offs land in riskAssessment.constraints (§37 recorded for D); deterministic ids
+✓ C-12: generator HARD_CONSTRAINT_REJECTED — a plan that would violate a hard constraint is REFUSED with the §35 context and NO plan is emitted (uses a CARRIED strategy: kill-site disjoint)
+✓ C-13: generator evidence refusals — INSUFFICIENT_EVIDENCE for underivable capabilities; OUT_OF_SCOPE for foreign carried objectIds (§40); refusal vocabulary frozen
+✓ C-14: generator coherence discipline — strategy must be a recommended strategy of the embedded diagnosis; target/diagnosis/plan-field breaches throw the structure-specific codes
+✓ C-15: generator determinism (§44) — identical requests are byte-identical; content changes move the plan id; no-context plans omit the constraints evidence key (disclosed omit-absent)
+✓ C-16: buildCorrectionPreview (§42) — exact dry-run record: affectedObjects, commands, §43 RULE_BASED expectedEvaluation, risks with exact §38 cost; SUBTREE variant; deterministic
+✓ C-17: preview input discipline — target/diagnosis incoherence and non-plan inputs are refused with the structure-specific codes
+✗ C-18: LIVE grounding — every generator-emitted command passes the live ToolRegistry validators; every plan kind maps to a REAL transaction.js factory; the local input contract is necessary AND sufficient against the live validators: T07 generator output must pass the LIVE validator ([{"code":"VALIDATION_SCHEMA","message":"fill or opacity required"}]): false !== true
+Error: T07 generator output must pass the LIVE validator ([{"code":"VALIDATION_SCHEMA","message":"fill or opacity required"}]): false !== true
+    at eq (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:140:39)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:1427:7
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:138:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:1381:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ C-19: integrated chain — resolve -> rank -> generate -> preview end-to-end frozen and deterministic; the §28 chain-end (NO_CAPABILITY) cannot enter planning
+✓ C-20: §14 boundary guard — the planning surface exports NO acceptance API; acceptance belongs to Checkpoint D
+
+Tests: 77 total, 75 passed, 2 failed

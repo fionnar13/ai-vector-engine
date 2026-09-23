@@ -1,0 +1,81 @@
+# PHASE 3.15 — CHECKPOINT G stub-kill PREDICTIONS (written BEFORE the battery).
+# Each kill appends a NEVER-INVOKED, syntactically-valid violation function to
+# src-js/correction.js (restored via sha256 from correction.js.checkpointG.pristine
+# = 9e31da8dff4be9b5eedea67dd2f7e425ada7e53d9338bef6e083bdeae2a00fe2) or edits
+# package.json (KILL-G6, valid JSON). Predicted failing sets are per-FILE runs
+# of tests/correction.test.mjs (144 tests: A-1..A-32, B, C, D, E, F-1..F-13, G-1..G-12).
+# Cross-fire was audited family by family; every non-predicted family is argued
+# to survive below.
+
+KILL-G1  correction.js += alias-form capability probe (never invoked):
+    const evalAlias = eval; const fnAlias = Function; const fetchAlias = fetch;
+    const winAlias = window; const docAlias = document; (+ void uses)
+  PREDICTED: {G-2}
+  Arguments: G-2 fires on every bare capability word (eval/Function/fetch/
+  window) AND on the bare document alias (the G-47 carve-out only exempts
+  .document PROPERTY access — `const docAlias = document;` is bare global
+  reach). G-1 survives: no import declaration and no require(/import( in the
+  probe. G-3..G-10 survive: no store/renderer/mutation words, no substrate
+  receivers, no async forms, while-count unchanged, package.json untouched.
+  G-11/G-12 survive (frozen tree untouched; appended code still strips 1:1 and
+  preserves all pinned code tokens).
+
+KILL-G2  correction.js += direct store/scene/history/renderer/wc mutation probe
+    (never invoked): probe.write/.set/.delete/.insert/.remove/.update;
+    substrate.stores.objectStore.write(0); substrate.sceneGraph.addObject('x');
+    substrate.historyManager.push('x'); renderer.render(tree); wc.write(0);
+    wc.commit(0);
+  PREDICTED: {G-3, G-4, G-5, G-6}
+  Arguments: G-3 fires on the \bstores\b word + the bare .write/.set/.delete/
+  .insert/.remove/.update/.commit/.render forms + the \brenderer\b word + the
+  .set-receiver probe (probe is not a pinned local Map). G-4 fires twice:
+  sceneGraph.addObject leaves the {findNodeByObjectId} projection and
+  substrate.stores leaves the disclosure-24 shape. G-5 fires:
+  historyManager.push leaves the {getTransactionToUndo} pin. G-6 fires:
+  wc.write/wc.commit leave the WC_VIEW pin. G-2 survives: none of
+  window/fetch/eval/Function/require/globalThis/process/fs/localStorage nor a
+  bare document appears. G-7/G-8/G-9 survive: no async forms, while-count
+  unchanged, no nest/DAG words, begin-receivers unchanged. G-10 survives: no
+  import changes.
+
+KILL-G3  correction.js += autonomous/deferred-execution probe (never invoked):
+    setTimeout / setInterval / setImmediate / queueMicrotask /
+    addEventListener / requestAnimationFrame / import('x') / new Promise
+  PREDICTED: {G-1, G-7, G-10}
+  Arguments: G-7 fires on all eight async forms. G-1 fires: import('x') is a
+  dynamic module-escape in code position (the stripped-body scan). G-10 fires:
+  its whole-src-js sweep runs the SAME dynamic-escape scan per file and
+  correction.js now carries one — the 3.14 KILL-1 cross-bite precedent (its
+  G-8 fired exactly this way). G-2 survives: the async forms contain no
+  capability WORDS. G-8 survives: the while-count is unchanged. All others
+  untouched.
+
+KILL-G4  correction.js += nesting/DAG/construction probe (never invoked):
+    const nestedBuilder = substrate.transactionBuilder; nestedBuilder.begin({});
+    b.build(); const nested = 1; const dag = 1;
+    new TransactionBuilder(); new HistoryManager();
+  PREDICTED: {G-5, G-6, G-9}
+  Arguments: G-6 fires twice: the begin-receiver set becomes
+  {nestedBuilder, transactionBuilder} (no second builder allowed) and the
+  new-construction scan catches new TransactionBuilder. G-5 fires:
+  \bHistoryManager\b now appears in code (never-referenced pin). G-9 fires:
+  the nested/DAG vocabulary + the begin-receiver pin. G-4 survives:
+  substrate.* is still exactly {registry, sceneGraph, transactionBuilder,
+  transactionManager} (an alias binding adds no property access). G-2/G-3/G-7/
+  G-8/G-10 survive: no capability words, no store/renderer/mutation forms, no
+  async forms, while-count unchanged, no import changes.
+
+KILL-G5  correction.js += unbounded-loop probe (never invoked):
+    let i = 0; while (i < 10){ i++; } while (true){ break; }
+  PREDICTED: {G-8}
+  Arguments: G-8 fires twice: the while-count becomes 3 (not exactly ONE) and
+  while(true) leaves the unbounded-form ban. G-7 survives: a synchronous while
+  is not an async form. All other scans see nothing new.
+
+KILL-G6  package.json += "dependencies": { "left-pad": "1.3.0" } (valid JSON —
+    an invalid file would crash Node at startup instead of failing the scan)
+  PREDICTED: {G-10}   (FILE-LEVEL run of tests/correction.test.mjs)
+  Arguments: G-10's package.json field check fires. Documented-not-run
+  (the 3.14 KILL-4 precedent): at FULL-SUITE level the sibling sweeps
+  (tests/ai.test.mjs G-5, tests/evaluation-critic.test.mjs G-8) would also
+  flip — they read the same package.json.

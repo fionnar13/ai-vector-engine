@@ -1,0 +1,145 @@
+✓ A-1: §5 state vocabulary — exactly the 11 CorrectionLoopState values, frozen (spec §5)
+✓ A-2: §50 termination vocabulary — exactly the 9 CorrectionTerminationReason values, frozen
+✓ A-3: §6 attempt status vocabulary — exactly the 7 CorrectionAttempt.status values, frozen
+✓ A-4: §7 target category + severity vocabularies — exactly 11 categories and 4 severities, frozen
+✓ A-5: §8 root-cause + §9 risk vocabularies — exactly 10 root causes and 3 risks, frozen
+✓ A-6: createCorrectionLoopPolicy() — the §18 implementation defaults are EXACT, deep-frozen, and validator-accepted
+✓ A-7: createCorrectionLoopPolicy(partial) merges over defaults; validator enforces types and bounds
+✓ A-8: CorrectionTarget — deterministic content-derived id, deep-frozen, JSON round-trip lossless, validator accepts
+✓ A-9: CorrectionTarget validation — mandatory fields, enums, confidence range, plain-data-only
+✓ A-10: CorrectionDiagnosis — deterministic id, deep-frozen, round-trip, all 10 root causes constructible
+✓ A-11: CorrectionDiagnosis validation — rootCause enum, confidence range, mandatory targetId, plain-data-only
+✓ A-12: CorrectionStrategy — deterministic id, deep-frozen, round-trip, all 3 risks constructible
+✓ A-13: CorrectionStrategy validation — risk enum, boolean reversible, plain-object commands, mandatory fields
+✓ A-14: CorrectionPlan — embeds valid diagnosis + strategy, deterministic id, deep-frozen, round-trip, validator accepts
+✓ A-15: CorrectionPlan validation — embedded records validated, mandatory sections, plain-data-only
+✓ A-16: CorrectionAttempt — embeds valid target + plan, deterministic id, deep-frozen, round-trip, all 7 statuses constructible
+✓ A-17: CorrectionAttempt validation — status enum, iteration integer, transactionId, plain-data-only, embedded records
+✓ A-18: createCorrectionLoopSession — §4 defaults, deterministic id, deep-frozen, round-trip, validator accepts
+✓ A-19: session validation — mandatory fields, bounds, trail start, TERMINATED⟺terminationReason in BOTH directions
+✓ A-20: CORRECTION_LOOP_TRANSITIONS — the §3 graph is present verbatim, frozen, and every endpoint is a §5 state
+✓ A-21: canTransition — §3 happy chain, §3 failure paths, and the five disclosed completion edges all legal
+✓ A-22: canTransition — illegal edges are false (IDLE shortcuts, backwards jumps, absorbing TERMINATED)
+✓ A-23: transitionSession — the full §3 happy chain from IDLE to VERIFIED, trail grows exactly, iteration untouched
+✓ A-24: transitionSession immutability — the input session is untouched (deep JSON compare before/after)
+✓ A-25: transitionSession rejection — illegal transitions throw CorrectionError(INVALID_TRANSITION) naming both states
+✓ A-26: transitionSession input discipline — unknown target state and invalid sessions rejected
+✓ A-27: §3 failure path — CORRECTING ->(CORRECTION_FAILED)-> ROLLING_BACK -> DIAGNOSING retry, second cycle reaches VERIFIED, trail records EVERY visit
+✓ A-28: §3 failure path — RE_EVALUATING ->(REGRESSION)-> ROLLING_BACK, then formal termination with EXECUTION_ERROR
+✓ A-29: §3 edge RE_EVALUATING->TERMINATED is a legal canTransition edge, but the reasonless direct jump is refused (INVALID_TERMINATION) — the §50 reason is mandatory
+✓ A-30: terminateSession — happy paths from RE_EVALUATING/VERIFIED/ROLLING_BACK with valid §50 reasons; invalid reasons rejected
+✓ A-31: TERMINATED is absorbing and illegal sources refuse termination — but §53 USER_CANCELLED is legal from ANY active state (any iteration)
+✓ A-32: determinism (§44) — two identical session chains produce byte-identical JSON; id stability across the chain
+✓ B-1: category→rootCause resolution table — exactly 11 keys covering every §7 category, frozen, values ∈ §8 causes, UNKNOWN unreachable
+✓ B-2: capability recipe table — frozen, every recipe grounded in a REGISTERED mutation tool (live registry), strictly positive confidence, reversible, scoped
+✓ B-3: grounding coverage — the seven executable causes are covered; SEMANTIC_ERROR/CONSTRAINT_VIOLATION/UNKNOWN are honest gaps whose provenance is the live registry itself
+✗ B-4: metric matcher dot-boundary discipline — prefix matches exact or dot-boundary only; attribution survives where strategy matching fails: 'alignment.deviation.px' matches the 'alignment' capability prefix: "NO_CAPABILITY" !== "RESOLVED"
+Error: 'alignment.deviation.px' matches the 'alignment' capability prefix: "NO_CAPABILITY" !== "RESOLVED"
+    at eq (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:99:39)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:726:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:97:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:724:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B-5: resolveCorrectionDiagnosis RESOLVED shape (POSITION) — §8 diagnosis with a capability-grounded strategy, deep-frozen end to end: POSITION + position.x must resolve: "NO_CAPABILITY" !== "RESOLVED"
+Error: POSITION + position.x must resolve: "NO_CAPABILITY" !== "RESOLVED"
+    at eq (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:99:39)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:735:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:97:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:732:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B-6: full 11-category sweep — 8 categories resolve to the mapped cause; SEMANTIC/TEXT/CONSTRAINT hit the §28 NO_CAPABILITY path with the exact record shape: POSITION: expected RESOLVED: "NO_CAPABILITY" !== "RESOLVED"
+Error: POSITION: expected RESOLVED: "NO_CAPABILITY" !== "RESOLVED"
+    at eq (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:99:39)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:772:5
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:97:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:755:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B-7: resolver determinism — identical target resolves with identical diagnosis/strategy ids and byte-identical JSON (§44): Cannot read properties of undefined (reading 'id')
+TypeError: Cannot read properties of undefined (reading 'id')
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:787:18
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:97:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:784:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B-8: content-derived ids move with content — objectIds change moves the strategy id; confidence change moves the diagnosis id but NOT the strategy id: Cannot read properties of undefined (reading 'recommendedStrategies')
+TypeError: Cannot read properties of undefined (reading 'recommendedStrategies')
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:796:23
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:97:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:793:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ B-9: resolver input discipline — invalid target content is refused with INVALID_TARGET before any resolution
+✓ B-10: §28 SEMANTIC — the NO_CAPABILITY resolution is a frozen, self-describing record; the Checkpoint A diagnosis contract (non-empty strategies) stands
+✗ B-11: §28 CONSTRAINT/TEXT — NO_CAPABILITY with live-registry provenance (T19/T20 proposal-class; no text-content editor exists): CONSTRAINT: cause still attributed honestly: "UNKNOWN" !== "CONSTRAINT_VIOLATION"
+Error: CONSTRAINT: cause still attributed honestly: "UNKNOWN" !== "CONSTRAINT_VIOLATION"
+    at eq (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:99:39)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:821:5
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:97:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:817:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ B-12: CorrectionImpact (§20) — LOCAL scope for the translate capability: no secondary objects, reversibility mirrors the strategy
+✓ B-13: CorrectionImpact (§20) — SUBTREE for hierarchy capabilities (T10) with the affected subtree roots recorded; conservative GLOBAL for unknown toolIds
+✓ B-14: CorrectionCost (§38) — deterministic integers: total = riskWeight × (commandCount + objectCount), objectCount deduped across commands
+✓ B-15: impact/cost input discipline — invalid strategy/target refused with the structure-specific codes
+✗ B-16: §19 ranking, single candidate — EXACT priority = Severity(2) × Confidence(1) × Impact(1) × Correctability(1) = 2, factors and cost attached, selected = ranked[0]: rankCorrectionStrategies requires a valid CorrectionDiagnosis (§8)
+CorrectionError: rankCorrectionStrategies requires a valid CorrectionDiagnosis (§8)
+    at rankCorrectionStrategies (file:///home/z/my-project/ai-vector-engine/src-js/correction.js:1125:11)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:874:15
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:97:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:871:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ B-17: §19 ranking, multi-candidate — deterministic order with EXACT priorities (input deliberately out of priority order)
+✓ B-18: §19 ranking tie-break — equal priorities keep the diagnosis recommendation order (deterministic stability, no entropy)
+✓ B-19: §19 strictly-positive property — even the worst legal candidate ranks strictly above zero (ranking viability, module-header disclosure 7)
+✓ B-20: ranking integrity — every ranked strategy comes from the diagnosis (never invented, §28), descending monotonicity, and input discipline
+✗ B-21: §27 explainCorrectionDiagnosis — deterministic plain-data explanation (two calls byte-identical), decision DIAGNOSED, >=3 reasons, zero function values: explainCorrectionDiagnosis requires a valid CorrectionDiagnosis (§8)
+CorrectionError: explainCorrectionDiagnosis requires a valid CorrectionDiagnosis (§8)
+    at explainCorrectionDiagnosis (file:///home/z/my-project/ai-vector-engine/src-js/correction.js:1166:11)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:939:14
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:97:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:936:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B-22: §27 number formatting — floats render in canonical JS form inside the summary (no locale, no entropy): explainCorrectionDiagnosis requires a valid CorrectionDiagnosis (§8)
+CorrectionError: explainCorrectionDiagnosis requires a valid CorrectionDiagnosis (§8)
+    at explainCorrectionDiagnosis (file:///home/z/my-project/ai-vector-engine/src-js/correction.js:1166:11)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:955:13
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:97:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:952:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ B-23: §27 explainCorrectionStrategySelection — labeled factors with exact values, priority in the summary, alternatives counted: rankCorrectionStrategies requires a valid CorrectionDiagnosis (§8)
+CorrectionError: rankCorrectionStrategies requires a valid CorrectionDiagnosis (§8)
+    at rankCorrectionStrategies (file:///home/z/my-project/ai-vector-engine/src-js/correction.js:1125:11)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:961:15
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:97:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:959:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ B-24: §27 selection determinism — two ranks of identical inputs produce byte-identical explanations
+✗ B-25: plural resolver — target input order preserved, frozen array, non-array input refused: input target order preserved: ["NO_CAPABILITY","NO_CAPABILITY","NO_CAPABILITY"] !== ["RESOLVED","NO_CAPABILITY","RESOLVED"]
+Error: input target order preserved: ["NO_CAPABILITY","NO_CAPABILITY","NO_CAPABILITY"] !== ["RESOLVED","NO_CAPABILITY","RESOLVED"]
+    at deepEq (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:100:91)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:990:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:97:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/correction.test.mjs:983:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Tests: 57 total, 46 passed, 11 failed
