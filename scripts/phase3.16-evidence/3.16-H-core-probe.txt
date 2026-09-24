@@ -1,0 +1,9 @@
+(1) stripper: 1:1, code preserved, comments/strings stripped (raw \bdisclosure\b: 74, stripped: 0)
+(2) clean module: ZERO matches for capability words, bare mutation surface, store/renderer vocabulary, async forms, unbounded forms, nesting/DAG; exactly ONE while (the guarded engineRun AUTO loop)
+(3) allowlists observed EXACTLY as pinned: substrate {registry,sceneGraph,transactionBuilder,transactionManager}; registry {get,has,validate}; transactionManager {execute,historyManager,undo}; transactionBuilder {addCommand,begin,build}; builder {addCommand,build}; sceneGraph {findNodeByObjectId}; historyManager {getTransactionToUndo}; ctx {constraints,scene,semantic,workingCopy}; scene {findNodeByObjectId}; tool {deterministic,execute,validate}; wc {16-prop WorkingCopy view}; execute-> {tool,transactionManager}; begin-> {transactionBuilder}; own-Map bookkeeping {seen,beforeByIdentity,afterByIdentity}
+(4) controls: ALL FIRE / negative controls clean; alias-form contrast proven (paren scans blind, word scans see)
+(5) src/core manifest: 178 files, aggregate sha256 = 137327739471ff095325854c296a82aa84afde0258b396ad6902b22de3e21e56 (buffer==utf8 agreement), top-level entries: 17
+(6) package.json: no dependencies/devDependencies/optionalDependencies/peerDependencies fields
+(7) correction.js import declarations: 0; dynamic module-escape calls in code body: 0 (the zero-import pin from Checkpoint A)
+
+PROBE PASS — patterns safe to embed in tests/correction.test.mjs

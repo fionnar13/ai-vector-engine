@@ -961,7 +961,7 @@ function unevaluatedExpectations(expected){
   const out = [];
   if (expected.spatial.aligned === true) out.push('spatial.aligned');
   if (expected.appearance.stroke !== null && expected.appearance.stroke !== undefined) out.push('appearance.stroke');
-  if (expected.constraint.satisfied !== null && expected.constraint.satisfied !== undefined) out.push('constraint.satisfied');
+  if (typeof expected.constraint.satisfied === 'boolean') out.push('constraint.satisfied');
   if (expected.semantic !== null && expected.semantic !== undefined) out.push('semantic');
   return out;
 }
@@ -1001,9 +1001,174 @@ export function evaluate(expectedState, documentContext, evaluationContext){
     if (evaluateTransformFor(entry, deviations, activeTransform)) ran.transform = true;
   }
   const evaluated = ['existence', 'geometry', 'appearance', 'placement', 'structure', 'transform'].filter(c => ran[c]);
+  // PHASE 3.16 — the constraint-compliance arm (see the section header): the
+  // compliance request rides in expected.constraint.satisfied; a bare boolean
+  // flag stays the 3.14 unevaluated marker (the records, not the flag, are
+  // the evaluable form).
+  let compliance = null;
+  const constraintRequest = isPlainObject(expectedState.constraint) ? expectedState.constraint.satisfied : undefined;
+  if (isPlainObject(constraintRequest) && Array.isArray(constraintRequest.records)){
+    if (constraintRequest.tolerance !== undefined && (!isFiniteNumber(constraintRequest.tolerance) || constraintRequest.tolerance < 0)){
+      throw new EvaluationError(EvaluationErrorCodes.INVALID_DEVIATION, 'constraint compliance request .tolerance must be a finite number >= 0');
+    }
+    const tolerance = isFiniteNumber(constraintRequest.tolerance) ? constraintRequest.tolerance : EVALUATION_TOLERANCES.geometry;
+    compliance = constraintCompliance(constraintRequest.records, actual, tolerance);
+    deviations.push(...compliance.deviations);
+    evaluated.push('constraint');
+  }
   const metadata = {
     tolerances: { ...EVALUATION_TOLERANCES },
     unevaluatedExpectations: unevaluatedExpectations(expectedState)
   };
+  if (compliance !== null){
+    metadata.constraintDeviations = compliance.constraintDeviations;
+    metadata.constraintResults = compliance.results;
+  }
   return createEvaluationResult({ expected: expectedState, actual, deviations, evaluated, metadata });
+}
+
+// ============================================================================
+// PHASE 3.16 — CONSTRAINT COMPLIANCE (internal arm; NO new exports — the
+// 12-export A/B-era surface is pinned). The compliance rides INSIDE the §55
+// evaluate() entry: an ExpectedState whose constraint.satisfied section is a
+// compliance request {records: [...], tolerance?} DECLARES the accepted
+// constraint regime as the desired state, and evaluate() verifies it against
+// the observed world boxes of the participants (the post-acceptance drift
+// model: accepted constraints OUTLIVE their originating plan).
+// ============================================================================
+//
+// PROPERTY NAMESPACING (the engine-correctability calibration): the deviation
+// property names the PINNED QUANTITY's class —
+//     alignLeft/alignRight/alignCenterX/vertical -> 'position.x'
+//     alignTop/alignBottom/alignCenterY/horizontal -> 'position.y'
+//     equalWidth  -> 'size.width'
+//     equalHeight -> 'size.height'
+//     fixedDistance -> 'position.distance'
+// Position-class deviations are the engine-correctable route (the frozen
+// correction derivation table carries a T05 rule for exactly
+// 'position.x'/'position.y'); size-class and distance-class deviations are
+// honest proposal-class gaps (no SAFE capability — the T06 origin-anchored
+// scale mutates position as a side effect).
+//
+// LOCALIZATION: like the house constraint kernel, the arm reports ONE
+// violation per constraint — the FIRST failing participant beyond the
+// reference (objectIds[0]) in objectIds order. Unobservable constraints
+// (missing participant, unmeasurable geometry) are UNVERIFIABLE — nothing is
+// invented (§15/§19/§21 honesty). Disabled constraints are DISABLED and
+// invisible. The per-constraint verdicts ride in
+// metadata.constraintResults; the deviation provenance (constraintId, the
+// violated participant, the reference) rides in
+// metadata.constraintDeviations — the §23 critic's constraint rule consumes
+// exactly that provenance.
+
+const CONSTRAINT_PINNED_PROPERTIES = deepFreeze({
+  alignLeft: { property: 'position.x', quantity: 'minX', label: 'minX' },
+  alignRight: { property: 'position.x', quantity: 'maxX', label: 'maxX' },
+  alignTop: { property: 'position.y', quantity: 'minY', label: 'minY' },
+  alignBottom: { property: 'position.y', quantity: 'maxY', label: 'maxY' },
+  alignCenterX: { property: 'position.x', quantity: 'centerX', label: 'centerX' },
+  alignCenterY: { property: 'position.y', quantity: 'centerY', label: 'centerY' },
+  horizontal: { property: 'position.y', quantity: 'centerY', label: 'centerY' },
+  vertical: { property: 'position.x', quantity: 'centerX', label: 'centerX' },
+  equalWidth: { property: 'size.width', quantity: 'width', label: 'width' },
+  equalHeight: { property: 'size.height', quantity: 'height', label: 'height' },
+  fixedDistance: { property: 'position.distance', quantity: 'distance', label: 'center distance' }
+});
+
+function constraintRecordShapeErrors(record){
+  const errors = [];
+  if (!isPlainObject(record)) return [createError(EvaluationErrorCodes.INVALID_DEVIATION, 'constraint record must be a plain object')];
+  if (!isNonEmptyString(record.id)) errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, 'constraint record .id must be a non-empty string'));
+  if (!isNonEmptyString(record.type) || CONSTRAINT_PINNED_PROPERTIES[record.type] === undefined){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, 'constraint record .type must be a supported house constraint type'));
+  }
+  if (!Array.isArray(record.objectIds) || record.objectIds.length < 2 || !record.objectIds.every(isNonEmptyString)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, 'constraint record .objectIds must carry at least two object ids'));
+  }
+  if (record.enabled !== undefined && typeof record.enabled !== 'boolean'){
+    errors.push(createError(EvaluationErrorCodes.INVALID_DEVIATION, 'constraint record .enabled must be boolean when present'));
+  }
+  return errors;
+}
+
+function bboxQuantityOf(bbox, quantity){
+  if (quantity === 'width') return isFiniteNumber(bbox.maxX - bbox.minX) ? bbox.maxX - bbox.minX : null;
+  if (quantity === 'height') return isFiniteNumber(bbox.maxY - bbox.minY) ? bbox.maxY - bbox.minY : null;
+  if (quantity === 'centerX') return isFiniteNumber(bbox.minX) && isFiniteNumber(bbox.maxX) ? (bbox.minX + bbox.maxX) / 2 : null;
+  if (quantity === 'centerY') return isFiniteNumber(bbox.minY) && isFiniteNumber(bbox.maxY) ? (bbox.minY + bbox.maxY) / 2 : null;
+  return isFiniteNumber(bbox[quantity]) ? bbox[quantity] : null;
+}
+
+// The compliance core: plain house records + the §10 snapshot -> {deviations,
+// results, constraintDeviations}. Pure, read-only, deterministic.
+function constraintCompliance(constraints, actualState, tolerance){
+  const deviations = [];
+  const results = [];
+  const constraintDeviations = [];
+  for (const record of constraints){
+    const shape = constraintRecordShapeErrors(record);
+    if (shape.length > 0){
+      throw new EvaluationError(EvaluationErrorCodes.INVALID_DEVIATION, 'constraint compliance: invalid constraint record', shape);
+    }
+    const spec = CONSTRAINT_PINNED_PROPERTIES[record.type];
+    if (record.enabled === false){
+      results.push(deepFreeze({ constraintId: record.id, type: record.type, status: 'DISABLED' }));
+      continue;
+    }
+    const boxes = [];
+    let unverifiable = null;
+    for (const oid of record.objectIds){
+      const entry = actualState.objects.find(e => e.objectId === oid);
+      if (!entry || entry.exists !== true){ unverifiable = { objectId: oid, reason: 'OBJECT_UNOBSERVED' }; break; }
+      if (!isPlainObject(entry.worldBBox)){ unverifiable = { objectId: oid, reason: 'GEOMETRY_UNMEASURABLE' }; break; }
+      boxes.push({ objectId: oid, bbox: entry.worldBBox });
+    }
+    if (unverifiable !== null){
+      results.push(deepFreeze({ constraintId: record.id, type: record.type, status: 'UNVERIFIABLE', reason: unverifiable.reason, objectId: unverifiable.objectId }));
+      continue;
+    }
+    if (record.type === 'fixedDistance' && !isFiniteNumber(record.parameters ? record.parameters.distance : undefined)){
+      results.push(deepFreeze({ constraintId: record.id, type: record.type, status: 'UNVERIFIABLE', reason: 'MISSING_DISTANCE_PARAMETER', objectId: record.objectIds[0] }));
+      continue;
+    }
+    const reference = boxes[0];
+    const expected = record.type === 'fixedDistance'
+      ? record.parameters.distance
+      : bboxQuantityOf(reference.bbox, spec.quantity);
+    let violated = null;
+    for (let i = 1; i < boxes.length; i++){
+      const actual = record.type === 'fixedDistance'
+        ? Math.hypot((boxes[i].bbox.minX + boxes[i].bbox.maxX) / 2 - (reference.bbox.minX + reference.bbox.maxX) / 2,
+                     (boxes[i].bbox.minY + boxes[i].bbox.maxY) / 2 - (reference.bbox.minY + reference.bbox.maxY) / 2)
+        : bboxQuantityOf(boxes[i].bbox, spec.quantity);
+      if (!isFiniteNumber(actual)) continue;
+      const error = Math.abs(actual - expected);
+      if (error > tolerance){ violated = { participant: boxes[i], actual, error }; break; }
+    }
+    if (violated === null){
+      results.push(deepFreeze({ constraintId: record.id, type: record.type, status: 'SATISFIED', expected, tolerance }));
+      continue;
+    }
+    const deviation = createDeviation({
+      category: 'geometry',
+      property: spec.property,
+      expected,
+      actual: violated.actual,
+      delta: violated.actual - expected,
+      tolerance,
+      severity: 'error',
+      objectId: violated.participant.objectId,
+      targetRef: '$doc:' + violated.participant.objectId,
+      message: `constraint '${record.type}' (${record.id}) violated: object '${violated.participant.objectId}' ${spec.label} ${violated.actual} deviates ${violated.error} from reference '${reference.objectId}' ${spec.label} ${expected} (tolerance ${tolerance})`
+    });
+    deviations.push(deviation);
+    results.push(deepFreeze({ constraintId: record.id, type: record.type, status: 'VIOLATED', property: spec.property,
+      expected, actual: violated.actual, error: violated.error, tolerance,
+      referenceObjectId: reference.objectId, violatedObjectId: violated.participant.objectId }));
+    constraintDeviations.push(deepFreeze({ deviationId: deviation.id, constraintId: record.id, type: record.type,
+      strength: record.strength === undefined ? null : record.strength, objectIds: [...record.objectIds],
+      referenceObjectId: reference.objectId, violatedObjectId: violated.participant.objectId,
+      property: spec.property, expected, actual: violated.actual, error: violated.error, tolerance }));
+  }
+  return { deviations, results, constraintDeviations };
 }

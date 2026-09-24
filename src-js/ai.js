@@ -485,8 +485,16 @@ export function validateExpectedState(state){
   if (ap.opacity !== null && ap.opacity !== undefined && (!isFiniteNumber(ap.opacity) || ap.opacity < 0 || ap.opacity > 1)){
     errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.appearance.opacity must be null or a number in [0,1]'));
   }
-  if (state.constraint.satisfied !== null && state.constraint.satisfied !== undefined && typeof state.constraint.satisfied !== 'boolean'){
-    errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.constraint.satisfied must be null or boolean'));
+  if (state.constraint.satisfied !== null && state.constraint.satisfied !== undefined){
+    const satisfied = state.constraint.satisfied;
+    // PHASE 3.16: the evaluable form is the compliance request
+    // {records: [...], tolerance?} — the accepted constraint regime declared
+    // as the desired state; a bare boolean stays the 3.14 unevaluated marker.
+    const ok = typeof satisfied === 'boolean' ||
+      (isPlainObject(satisfied) && Array.isArray(satisfied.records));
+    if (!ok){
+      errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.constraint.satisfied must be null, boolean, or a compliance request {records: [...], tolerance?}'));
+    }
   }
   if (state.structure.grouped !== null && state.structure.grouped !== undefined && typeof state.structure.grouped !== 'boolean'){
     errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.structure.grouped must be null or boolean'));
@@ -1347,4 +1355,195 @@ export function compilePlanToDSL(plan){
     throw new PlanningError(PlanningErrorCodes.PLAN_INVALID, 'compilePlanToDSL requires resolvable step dependency references (§18)', refErrors);
   }
   return deepFreeze({ version: '1.0', program: plan.steps.map(compileStepToInstruction) });
+}
+
+// ============================================================================
+// PHASE 3.16 — CONSTRAINT-AWARE PLANNING ARMS (the planner integration)
+// ============================================================================
+// Two pure planning-time verifications over the ACCEPTED constraint regime
+// (the T19-inferred, store-accepted records). Both are rule-based and
+// conservative — the §43 sanction for rule-based prediction — and both are
+// computed WITHOUT scene access: the arrangement projection and the plan
+// steps carry everything (the planner stays read-only, imports stay exactly
+// './tools.js').
+//
+//   verifyArrangementAgainstConstraints(arrangement, constraints, options?)
+//       The DATA face: an arrangement is a plain map
+//       {objectId -> {geometry:{width,height}, spatial:{bbox}}} — the
+//       PlanningContext.objects projection. For each enabled constraint the
+//       pinned quantity is extracted per participant and compared against the
+//       REFERENCE (objectIds[0]). Missing participants or absent quantities
+//       are UNVERIFIABLE — the planner never invents a verdict. Verdicts are
+//       deep-frozen and deterministic.
+//
+//   verifyPlanStepsAgainstConstraints(plan, constraints)
+//       The STATIC MUTATION face (the planning-time mirror of the correction
+//       gate's axis model): a plan step's mutated axes are classified from
+//       its tool and input (T05 by delta, T08/T09 by axis param, T07/T12
+//       none, T06/T10/T11 and unknown tools conservatively everything); a
+//       HARD (required) constraint whose pinned axes intersect a step's
+//       mutation axes, and whose participants the step touches, CONFLICTS.
+//       Soft constraints trade off at runtime and are not flagged here.
+//
+// The axis/quantity tables mirror the frozen correction module's semantics
+// (CONSTRAINT_PINNED_AXES / TOOL_MUTATION_AXES) — mirrored, not imported: the
+// one-substrate import contract is pinned and untouched.
+// ============================================================================
+
+export const EXPECTED_STATE_CONSTRAINT_QUANTITIES = deepFreeze({
+  equalWidth: { quantity: 'width', source: 'geometry', label: 'width' },
+  equalHeight: { quantity: 'height', source: 'geometry', label: 'height' },
+  alignLeft: { quantity: 'minX', source: 'bbox', label: 'minX' },
+  alignRight: { quantity: 'maxX', source: 'bbox', label: 'maxX' },
+  alignTop: { quantity: 'minY', source: 'bbox', label: 'minY' },
+  alignBottom: { quantity: 'maxY', source: 'bbox', label: 'maxY' },
+  alignCenterX: { quantity: 'centerX', source: 'bbox', label: 'centerX' },
+  alignCenterY: { quantity: 'centerY', source: 'bbox', label: 'centerY' },
+  horizontal: { quantity: 'centerY', source: 'bbox', label: 'centerY' },
+  vertical: { quantity: 'centerX', source: 'bbox', label: 'centerX' }
+});
+
+const PLANNER_PINNED_AXES = deepFreeze({
+  horizontal: ['y'], alignCenterY: ['y'], vertical: ['x'], alignCenterX: ['x'],
+  alignLeft: ['x'], alignRight: ['x'], alignTop: ['y'], alignBottom: ['y'],
+  equalWidth: ['width'], equalHeight: ['height'], fixedDistance: ['x', 'y']
+});
+
+const PLANNER_TOOL_AXES = deepFreeze({
+  T05: 'DELTA', T06: ['x', 'y', 'width', 'height'], T07: [], T08: 'AXIS_PARAM',
+  T09: 'AXIS_PARAM', T10: ['x', 'y', 'width', 'height'], T11: ['x', 'y', 'width', 'height'], T12: []
+});
+const PLANNER_ALL_AXES = deepFreeze(['x', 'y', 'width', 'height']);
+
+function planReferenceId(v){
+  if (!isNonEmptyString(v)) return null;
+  return v.startsWith('$doc:') ? v.slice('$doc:'.length) : v;
+}
+
+function stepMutationAxes(step){
+  const input = isPlainObject(step.input) ? step.input : {};
+  const model = PLANNER_TOOL_AXES[step.toolId];
+  if (model === undefined) return [...PLANNER_ALL_AXES];
+  if (model === 'DELTA'){
+    const d = input.delta;
+    if (!isPlainObject(d) || !isFiniteNumber(d.x) || !isFiniteNumber(d.y)) return [...PLANNER_ALL_AXES];
+    const axes = [];
+    if (d.x !== 0) axes.push('x');
+    if (d.y !== 0) axes.push('y');
+    return axes;
+  }
+  if (model === 'AXIS_PARAM'){
+    if (input.axis === 'horizontal') return ['x'];
+    if (input.axis === 'vertical') return ['y'];
+    if (input.axis === 'both') return ['x', 'y'];
+    return ['x', 'y'];
+  }
+  return [...model];
+}
+
+function arrangementQuantityOf(state, spec){
+  if (!isPlainObject(state)) return null;
+  if (spec.source === 'geometry'){
+    const g = isPlainObject(state.geometry) ? state.geometry : {};
+    return isFiniteNumber(g[spec.quantity]) ? g[spec.quantity] : null;
+  }
+  const bbox = isPlainObject(state.spatial) && isPlainObject(state.spatial.bbox) ? state.spatial.bbox : null;
+  if (!bbox) return null;
+  if (spec.quantity === 'centerX') return isFiniteNumber(bbox.minX) && isFiniteNumber(bbox.maxX) ? (bbox.minX + bbox.maxX) / 2 : null;
+  if (spec.quantity === 'centerY') return isFiniteNumber(bbox.minY) && isFiniteNumber(bbox.maxY) ? (bbox.minY + bbox.maxY) / 2 : null;
+  return isFiniteNumber(bbox[spec.quantity]) ? bbox[spec.quantity] : null;
+}
+
+export function verifyArrangementAgainstConstraints(arrangement, constraints, options){
+  if (!isPlainObject(arrangement)){
+    throw new PlanningError(PlanningErrorCodes.INVALID_PARAMETER, 'verifyArrangementAgainstConstraints requires a plain arrangement map {objectId -> {geometry, spatial}}');
+  }
+  if (!Array.isArray(constraints)){
+    throw new PlanningError(PlanningErrorCodes.INVALID_PARAMETER, 'verifyArrangementAgainstConstraints requires an array of plain constraint records');
+  }
+  if (options !== undefined && !isPlainObject(options)){
+    throw new PlanningError(PlanningErrorCodes.INVALID_PARAMETER, 'options must be undefined or a plain object {tolerance}');
+  }
+  const tolerance = options && isFiniteNumber(options.tolerance) ? options.tolerance : 1e-9;
+  const checks = [];
+  for (const record of constraints){
+    if (!isPlainObject(record) || !isNonEmptyString(record.id) || !isNonEmptyString(record.type) || !Array.isArray(record.objectIds)){
+      throw new PlanningError(PlanningErrorCodes.INVALID_PARAMETER, 'verifyArrangementAgainstConstraints: invalid constraint record');
+    }
+    const spec = EXPECTED_STATE_CONSTRAINT_QUANTITIES[record.type];
+    if (record.enabled === false){
+      checks.push(deepFreeze({ constraintId: record.id, type: record.type, status: 'DISABLED' }));
+      continue;
+    }
+    if (spec === undefined || record.objectIds.length < 2){
+      checks.push(deepFreeze({ constraintId: record.id, type: record.type, status: 'UNVERIFIABLE', reason: 'UNSUPPORTED_TYPE' }));
+      continue;
+    }
+    const quantities = [];
+    let missing = null;
+    for (const oid of record.objectIds){
+      const state = arrangement[oid];
+      if (state === undefined){ missing = { objectId: oid, reason: 'OBJECT_MISSING' }; break; }
+      const q = arrangementQuantityOf(state, spec);
+      if (q === null){ missing = { objectId: oid, reason: 'QUANTITY_ABSENT' }; break; }
+      quantities.push({ objectId: oid, value: q });
+    }
+    if (missing !== null){
+      checks.push(deepFreeze({ constraintId: record.id, type: record.type, status: 'UNVERIFIABLE', reason: missing.reason, objectId: missing.objectId }));
+      continue;
+    }
+    let violated = null;
+    for (let i = 1; i < quantities.length; i++){
+      const error = Math.abs(quantities[i].value - quantities[0].value);
+      if (error > tolerance){
+        violated = { violatedObjectIds: [quantities[i].objectId], expected: quantities[0].value, actual: quantities[i].value };
+        break;
+      }
+    }
+    if (violated !== null){
+      checks.push(deepFreeze({ constraintId: record.id, type: record.type, status: 'VIOLATED', ...violated, tolerance }));
+    } else {
+      checks.push(deepFreeze({ constraintId: record.id, type: record.type, status: 'SATISFIED', expected: quantities[0].value, tolerance }));
+    }
+  }
+  const status = checks.some(c => c.status === 'VIOLATED') ? 'VIOLATED'
+    : checks.some(c => c.status === 'UNVERIFIABLE') ? 'UNVERIFIABLE' : 'PRESERVED';
+  return deepFreeze({ status, checks });
+}
+
+export function verifyPlanStepsAgainstConstraints(plan, constraints){
+  if (!isPlainObject(plan) || !Array.isArray(plan.steps) || plan.steps.length === 0){
+    throw new PlanningError(PlanningErrorCodes.INVALID_PARAMETER, 'verifyPlanStepsAgainstConstraints requires a plan with a non-empty steps array');
+  }
+  if (!Array.isArray(constraints)){
+    throw new PlanningError(PlanningErrorCodes.INVALID_PARAMETER, 'verifyPlanStepsAgainstConstraints requires an array of plain constraint records');
+  }
+  const conflicts = [];
+  plan.steps.forEach((step, stepIndex) => {
+    if (!isPlainObject(step) || !isNonEmptyString(step.toolId)) return;
+    const input = isPlainObject(step.input) ? step.input : {};
+    const stepIds = (Array.isArray(input.objectIds) ? input.objectIds : [])
+      .map(planReferenceId).filter(isNonEmptyString);
+    const mutated = stepMutationAxes(step);
+    for (const record of constraints){
+      if (!isPlainObject(record) || !isNonEmptyString(record.id) || !isNonEmptyString(record.type) || !Array.isArray(record.objectIds)) continue;
+      if (record.enabled === false || record.strength !== 'required') continue;
+      const pinned = PLANNER_PINNED_AXES[record.type];
+      if (pinned === undefined) continue; // unclassifiable constraints are skipped, never guessed
+      const touching = record.objectIds.some(oid => stepIds.includes(oid));
+      if (!touching) continue;
+      const shared = mutated.filter(a => pinned.includes(a));
+      if (shared.length === 0) continue;
+      let conflict = conflicts.find(c => c.stepIndex === stepIndex);
+      if (!conflict){
+        conflict = { stepIndex, toolId: step.toolId, axes: [...shared], constraintIds: [] };
+        conflicts.push(conflict);
+      }
+      for (const axis of shared){
+        if (!conflict.axes.includes(axis)) conflict.axes.push(axis);
+      }
+      conflict.constraintIds.push(record.id);
+    }
+  });
+  return deepFreeze({ status: conflicts.length > 0 ? 'CONFLICTS' : 'PRESERVED', conflicts });
 }

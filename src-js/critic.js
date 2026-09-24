@@ -413,7 +413,7 @@ export function proposeCorrections(evaluationResult){
   const deviations = evaluationResult.deviations;
   for (let i = 0; i < deviations.length; i++){
     const d = deviations[i];
-    const built = proposalFor(d, evaluationResult);
+    const built = constraintProposalFor(d, evaluationResult) || proposalFor(d, evaluationResult);
     if (built === null) continue; // §28: unsupported corrections produce NO proposal
     const key = stableStringify(built.intent) + '|' + (d.targetRef === null ? '' : d.targetRef) + '|' + (d.objectId === null || d.objectId === undefined ? '' : d.objectId);
     if (seen.has(key)) continue; // dedup (§28-safe): identical corrections collapse, first deviation wins
@@ -443,4 +443,67 @@ export function evaluateAndCritique(expectedState, documentContext, evaluationCo
   const evaluationResult = evaluate(expectedState, documentContext, evaluationContext);
   const proposals = proposeCorrections(evaluationResult);
   return deepFreeze({ evaluationResult, proposals });
+}
+
+// ============================================================================
+// PHASE 3.16 — THE CONSTRAINT RULE (inside the §23 proposeCorrections rule
+// engine; NO new exports — the 6-export C/D-era surface is pinned).
+// ============================================================================
+// CAPABILITY BACKING (§27/§28 — every proposal maps to a real planning
+// capability; everything else declines HONESTLY):
+//   position-class constraint violations (property 'position.x' /
+//     'position.y' — the align/center pinned-axis errors the evaluation
+//     arm emits) -> {type:'transform', targets:[violated],
+//     operation:'translate', params:{x,y}} with delta = expected - actual
+//     on the pinned axis and 0 on the other — T05 move_object, DELTA
+//     semantics, no side effects on any other axis.
+//   size-class (equalWidth/equalHeight -> 'size.width'/'size.height') and
+//     distance-class (fixedDistance) violations -> NO proposal. The only
+//     size capability is T06, whose affine transform is origin-anchored:
+//     scaling the width MOVES the object (a position side effect that can
+//     violate OTHER accepted constraints). No SAFE capability exists, so
+//     per §28 nothing is proposed — surfaced, never patched.
+//
+// ROUTING: a deviation is a CONSTRAINT violation when the evaluation
+// record's metadata.constraintDeviations carries its provenance (by
+// deviationId) — the constraint rule then owns it EXCLUSIVELY (it is never
+// re-interpreted as a desired-state geometry mismatch). Deviations without
+// constraint provenance follow the 3.14 rules verbatim. Ordering, dedup
+// (canonical intent + targetRef + objectId), priority = the deviation's
+// index, and the content-derived 7-key ids are the shared §29/§30
+// discipline — the pass adds no entropy and no new contract.
+// ============================================================================
+
+const CONSTRAINT_CORRECTABLE_PROPERTIES = deepFreeze(['position.x', 'position.y']);
+
+// The constraint provenance for a deviation, or null when the deviation is
+// not a constraint violation.
+function constraintProvenanceFor(d, result){
+  const md = result.metadata;
+  if (!isPlainObject(md) || !Array.isArray(md.constraintDeviations)) return null;
+  return md.constraintDeviations.find(cd => isPlainObject(cd) && cd.deviationId === d.id) || null;
+}
+
+// The constraint rule (the 3.16 arm of the rule dispatch). Returns the
+// {intent, reason} pair or null (unsupported classes decline per §28).
+function constraintProposalFor(d, result){
+  const provenance = constraintProvenanceFor(d, result);
+  if (provenance === null) return null;
+  const property = isNonEmptyString(provenance.property) ? provenance.property : d.property;
+  if (!CONSTRAINT_CORRECTABLE_PROPERTIES.includes(property)) return null;
+  const expected = d.expected;
+  const actual = d.actual;
+  if (!isFiniteNumber(expected) || !isFiniteNumber(actual)) return null;
+  const dx = property === 'position.x' ? expected - actual : 0;
+  const dy = property === 'position.y' ? expected - actual : 0;
+  if (dx === 0 && dy === 0) return null;
+  const target = isNonEmptyString(d.objectId) ? d.objectId
+    : (isNonEmptyString(provenance.violatedObjectId) ? provenance.violatedObjectId : null);
+  if (target === null) return null;
+  const type = isNonEmptyString(provenance.type) ? provenance.type : 'constraint';
+  const constraintId = isNonEmptyString(provenance.constraintId) ? provenance.constraintId : '';
+  return {
+    intent: { type: 'transform', targets: [target], operation: 'translate', params: { x: dx, y: dy } },
+    reason: `translate '${target}' by (${dx},${dy}) to satisfy the accepted ${type} constraint '${constraintId}'`
+  };
 }
