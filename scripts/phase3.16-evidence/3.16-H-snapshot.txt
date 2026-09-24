@@ -1,0 +1,39 @@
+=== PHASE 3.16 PRISTINE SNAPSHOT (H-10, captured AFTER GREEN — final H-1 re-verification) ===
+Captured: 2026-09-24T06:07:34Z
+Branch: feat/phase-3.15-correction-loop  HEAD: cd5494d (0 commits beyond)
+
+-- sha256 (modified) --
+9fb2eece9514f19641fcec9553d5dd33ccefdab5c4172cbd8b8e8ffd2f9cd267  src-js/ai.js
+3b9061f071ab8b43871c5f2ee7f7b9d08954f93a28f74f5e17bc293efabe2e5a  src-js/evaluation.js
+305ab38c33081524623d7143127de1fc6c1cb6220831bce3a01b042e687132c7  src-js/critic.js
+-- sha256 (added) --
+741f92c43aa0fe7dd23a096caa28b83eb78d86278e52f0394fc0bb4ab593daf3  src-js/constraint-inference.js
+6a733b5c95c6b2d29489cfb4be8c5fa119ee10847c2b138c73edff5576bdfbee  tests/constraint-inference.test.mjs
+-- sha256 (frozen references) --
+9e31da8dff4be9b5eedea67dd2f7e425ada7e53d9338bef6e083bdeae2a00fe2  src-js/correction.js
+5ec1369b16c1294101e19d45bece4250be5fdcb1d1878eb07d6de87e5c0ea5e4  src-js/transaction.js
+b329cc0d410cef4fe81fa75deec5f2ad7655974c2ecdda13c1f669a12e8da965  package.json
+34d21656bbc3059e8d917d6d27c0327c03ddb46e4d832647db973634c198a38f  scripts/run-suite.sh
+
+-- line counts --
+   377 src-js/constraint-inference.js
+  1549 src-js/ai.js
+  1174 src-js/evaluation.js
+   509 src-js/critic.js
+  1809 tests/constraint-inference.test.mjs
+  5418 total
+
+-- export counts --
+constraint-inference.js: 10 exports
+ai.js: 20 exports
+evaluation.js: 12 exports
+critic.js: 6 exports
+
+-- 3.16 additions (numstat vs HEAD cd5494d) --
+201	2	src-js/ai.js
+64	1	src-js/critic.js
+166	1	src-js/evaluation.js
+-- untracked --
+scripts/phase3.16-evidence/
+src-js/constraint-inference.js
+tests/constraint-inference.test.mjs

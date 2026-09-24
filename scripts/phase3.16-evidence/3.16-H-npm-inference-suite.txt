@@ -1,0 +1,130 @@
+=== PHASE 3.16 Category A: Data Contracts (9 tests) ===
+✓ A-1: T19_SUPPORTED_TYPES is exactly the A-2/D-8 intersection {equalWidth, equalHeight, align, center} — frozen
+✓ A-2: T19_HOUSE_MAPPING — frozen, complete: every T19 type maps >=1 house type; align covers the four edges; center covers both center axes
+✓ A-3: validateInferenceRequest accepts the golden request shape {utterance, objects[>=2], strength?} and returns {valid:true, errors:[]}
+✓ A-4: validateInferenceRequest deterministic refusals — non-object, missing/non-string utterance, <2 objects, non-string ids, function values, invalid strength
+✓ A-5: inferConstraints output shape — exact proposal key set, frozen plain data, unmatched honesty list
+✓ A-6: proposal ids are content-derived UUID-v4-FORMAT strings and are accepted by the LIVE ConstraintStore (create -> list round-trip)
+✓ A-7: toHouseConstraintRecord — exact house shape, house type within the live constraints.js vocabulary, enabled:true, source ai
+✓ A-8: validateHouseConstraintRecord refusals — missing keys, unknown type, bad strength, bad id format, non-array objectIds
+✓ A-9: every 3.16 inference-surface output is deep-frozen (proposals, house records, validator verdicts are plain data)
+=== PHASE 3.16 Category B: T19 Vocabulary Mapping (8 tests) ===
+✓ B-1: equal width is inferred as T19 equalWidth mapped to the house equalWidth type over ALL participants (reference = first)
+✓ B-2: equal height is inferred as T19 equalHeight mapped to the house equalHeight type
+✓ B-3: the align family — left/right/top/bottom phrasings map to alignLeft/alignRight/alignTop/alignBottom with the fixed edge semantics
+✓ B-4: center phrasings — horizontally maps to alignCenterX, vertically to alignCenterY (single-axis centering)
+✓ B-5: unqualified centered maps to BOTH center axes — two proposals, deterministic order (alignCenterX then alignCenterY)
+✓ B-6: unsupported vocabulary is honestly unmapped — zero proposals invented, the span reported in unmatched
+✓ B-7: multi-phrase utterances produce the deterministic full set in fixed table order (equal width + align left)
+✓ B-8: the mapping closes onto the LIVE house vocabulary — every inferred houseType is in constraints.js VALID_TYPES, and paraphrases of the same logical constraint yield the SAME content-derived id
+=== PHASE 3.16 Category C: T19 Pass-Through (4 tests) ===
+✓ C-1: an already-canonical house record validates unchanged — validateHouseConstraintRecord is a pure shape verdict (no transformation, no re-id)
+✓ C-2: canonical records of ALL eleven house types pass validation — the pass-through surface covers the full live vocabulary, not just the T19 subset
+✓ C-3: the acceptance chain preserves identity — the house record id EQUALS the proposal id (no re-id through toHouseConstraintRecord)
+✓ C-4: canonical records round-trip the LIVE ConstraintStore byte-identically — the store is the acceptance authority and the 3.16 records are first-class citizens
+=== PHASE 3.16 Category D: Provenance & Confidence (3 tests) ===
+✓ D-1: every proposal carries deterministic provenance {phrase, rule} with rule = T19:<t19Type> and the phrase traceable in the utterance
+✓ D-2: confidence is rule-derived, in (0,1], constant 1 for exact phrase matches, and deterministic across runs
+✓ D-3: the provenance survives acceptance — the house record embeds {t19Type, inferredBy:'T19'} so the audit trail reaches the loop seams
+=== PHASE 3.16 Category E: No Mutation (5 tests) ===
+✓ E-1: inferConstraints does not mutate the request record
+✓ E-2: inferConstraints does not mutate the objects array or its entries (including entry order and nested values)
+✓ E-3: toHouseConstraintRecord does not mutate the proposal (the acceptance path is read-only over its source)
+✓ E-4: the validators never mutate their inputs (request, proposal, house record)
+✓ E-5: acceptance is alias-free — the LIVE ConstraintStore record, the frozen house record, and every store read are independent deep structures (no aliasing in any direction)
+=== PHASE 3.16 Category F: Determinism (3 tests) ===
+✓ F-1: inferConstraints — identical requests yield byte-identical outputs (ids, provenance, order), Invariant 17 face
+✓ F-2: toHouseConstraintRecord + the validators are byte-identical across runs
+✓ F-3: content identity is key-order-insensitive — permuting the KEY ORDER inside object entries and the request yields identical inference output (stable canonicalization)
+=== PHASE 3.16 Category G: Architecture Scans — constraint-inference.js (4 tests) ===
+✓ G-1: constraint-inference.js ZERO-import pin — no import declarations at all, no dynamic module escape (require( / import() in the code body)
+✓ G-2: constraint-inference.js code body reaches no capability surface — window/document/fetch/eval/Function/globalThis/process/fs/localStorage/require/Date.now/Math.random absent (alias-form word-boundary scan on the stripped body)
+✓ G-3: constraint-inference.js calls no mutation method — the full substrate mutation vocabulary is absent from the stripped body (the module is pure data, reads nothing, writes nothing)
+✓ G-4: scan-harness sanity (anti-vacuity) — the stripper preserves the module's code tokens AND removes the documented comment occurrences with 1:1 char/line mapping
+=== PHASE 3.16 Category H: Backward Compatibility (3 tests) ===
+✓ H-1: evaluation.js evaluate() contract is UNCHANGED — a 3.14-style geometry expectation yields the exact §12 record shape with metadata keys exactly {tolerances, unevaluatedExpectations} (the 3.16 arm added a SEPARATE export, never touched the engine)
+✓ H-2: critic.js proposeCorrections contract is UNCHANGED — the regular rule engine still produces the 3.14 create-rebuild proposal for a geometry deviation and does NOT consume the 3.16 constraint deviations (the constraint pass is a separate, additive surface)
+✓ H-3: ai.js planning contracts are UNCHANGED — the documented 3.13 rules still hold (slice plan T01->T07, transform scale resolves the T06 diagonal, create-planning context stays deep-frozen plain data)
+=== PHASE 3.16 Category I: Planner Integration (8 tests) ===
+✓ I-1: verifyArrangementAgainstConstraints — the golden column satisfies all three T19-inferred constraints: PRESERVED with per-constraint SATISFIED checks
+✓ I-2: a violating arrangement is caught BEFORE planning executes — VIOLATED names the constraint and the violated participant (the planning-time face of P-5)
+✓ I-3: missing participant state or unmeasurable quantities are UNVERIFIABLE — the planner never invents a verdict (honesty face)
+✓ I-4: disabled constraints are invisible to the planning-time verification
+✓ I-5: the planning verdicts are deterministic, deep-frozen, and computed without mutating their inputs
+✓ I-6: verifyPlanStepsAgainstConstraints — a T05 step whose delta mutates a pinned axis of a touching HARD constraint CONFLICTS at planning time (the static mutation face, mirroring the correction gate semantics)
+✓ I-7: verifyPlanStepsAgainstConstraints — a T07 appearance step mutates no geometric axis (PRESERVED under any constraint); a T05 delta on a NON-pinned axis is PRESERVED; an unclassifiable tool is conservatively flagged
+✓ I-8: integration — the planner's OWN creation ExpectedStates, projected into the arrangement shape, satisfy the T19-inferred regime (the arrangement IS the constraints' origin: the loop of I returns PRESERVED on its own output)
+=== PHASE 3.16 Category J: Evaluation Integration (14 tests) ===
+✓ J-1: evaluateConstraintCompliance over the satisfied golden column — zero deviations, all results SATISFIED, empty constraintDeviations
+✓ J-2: the alignLeft drift produces EXACTLY ONE §13 deviation — category geometry, property position.x, expected 100, actual 130, delta 30, tolerance 1e-9, objectId = the drifted participant, targetRef $doc: — with a deterministic message
+✓ J-3: equalWidth violations report the size class — property size.width with the reference width as expected
+✓ J-4: equalHeight violations report size.height with the same contract
+✓ J-5: center constraints report the pinned center axis — alignCenterX deviations carry position.x with centerX quantities; alignCenterY carries position.y
+✓ J-6: localization is deterministic — when MULTIPLE participants fail, the deviation names the FIRST failing participant in objectIds order (the constraints.js break semantics)
+✓ J-7: fixedDistance violations report the distance class with the configured distance as expected
+✓ J-8: a missing participant is UNVERIFIABLE — no deviation is invented for an unobservable constraint (§21 honesty)
+✓ J-9: an unmeasurable geometry (worldBBox null) is UNVERIFIABLE — an unmeasurable constraint is never invented (§15/§19 honesty)
+✓ J-10: disabled constraints are DISABLED and invisible — no deviation, no influence on other results
+✓ J-11: the tolerance boundary — an error exactly at the tolerance is SATISFIED, beyond it a deviation (the §14/§15 kernel discipline)
+✓ J-12: the compliance arm is read-only — neither the ActualState nor the constraint records are mutated, and the result is deep-frozen
+✓ J-13: the host merge — compliance output flows through the LIVE createEvaluationResult into a valid §12 record (DEVIATION with metadata.constraintDeviations; PASS when satisfied)
+✓ J-14: the compliance arm is deterministic — identical inputs yield byte-identical output (Invariant 17 face), including ids and messages
+=== PHASE 3.16 Category K: Critic Integration (14 tests) ===
+✓ K-1: proposeConstraintCorrections on a satisfied (PASS) constraint evaluation yields empty proposals and empty declined (frozen plain data)
+✓ K-2: the alignLeft violation yields EXACTLY ONE 7-key §25 proposal — intent transform/translate with delta = expected - actual on the pinned axis, deviationId/targetRef carried verbatim, confidence 1, priority 0
+✓ K-3: the delta direction follows the pinned axis — an alignTop violation translates on y only; an alignCenterX violation on x only
+✓ K-4: an equalWidth violation produces NO proposal — declined with the honest NO_SAFE_CAPABILITY reason (§28: the T06 origin-anchored scale mutates position; the architecture is never bypassed)
+✓ K-5: the mixed verdict — size-class violations decline while the position-class violation still proposes (one pass, both faces)
+✓ K-6: the constraint pass is deterministic — identical evaluation records yield byte-identical pass output (ids included)
+✓ K-7: proposal ordering follows the constraintDeviations order — priority equals the deviation index (the §30 primary basis)
+✓ K-8: dedup — two accepted constraints whose fixes collapse to the SAME translate intent produce ONE proposal (the first deviation wins, the 3.14 dedup discipline)
+✓ K-9: the pass consumes the §12 contract — non-EvaluationResult input and shape-violating records throw CriticError INVALID_EVALUATION_RESULT (never a shape guess)
+✓ K-10: an evaluation record whose metadata carries no constraintDeviations yields an empty pass result — the critic never guesses constraint provenance
+✓ K-11: an orphan constraintDeviation (its deviationId absent from result.deviations) is skipped — no proposal without a live deviation anchor
+✓ K-12: every proposal is a valid LIVE §25 record whose intent stays inside the transform capability vocabulary (type/targets/operation/params keys only)
+✓ K-13: the constraint pass is read-only over the evaluation record and returns frozen plain data
+✓ K-14: integration — the proposal intent is PLANNABLE: the LIVE createPlan accepts it and resolves the T05 step with the exact delta (the §26 route back to the doc: proposal -> Planner -> Plan -> DSL -> Transaction)
+=== PHASE 3.16 Category L: Correction Loop Integration (14 tests) ===
+=== PHASE 3.16 Category M: Golden Scenario + Properties + Final Scans (17 tests) ===
+✓ M-4 (P-2 Identity): the same logical constraint yields the same stable content-derived id across paraphrases, runs, and the acceptance chain; any logical change moves the id
+✓ M-10: FINAL SCAN — no fetch / HTTP / network anywhere in the 3.16 surface (stripped code bodies of all four production files + the test file imports only relative or declared node: builtins)
+✓ M-11: FINAL SCAN — no fs access in the 3.16 production surface (stripped bodies: no fs, no require, no node: specifier) — the test file's node:fs import is the declared harness exception
+✓ M-12: FINAL SCAN — no LLM API vocabulary anywhere in the 3.16 surface (stripped bodies: openai, anthropic, llm, completion, embedding, api_key, apikey, chat/completions routes; the test file imports no such module)
+✓ M-13: FINAL SCAN — no direct Store writes in the 3.16 surface: the stripped production bodies carry no store-mutation call form and no store/SceneGraph constructor vocabulary (the arms are pure; the ONLY writer is the transaction pipeline)
+✓ M-14: FINAL SCAN — no direct SceneGraph mutation in the 3.16 surface: no node-creation/reparenting/removal vocabulary in the stripped production bodies
+✓ M-15: FINAL SCAN — no Transaction bypass in the 3.16 surface: the arms never execute, commit, or undo — the engine (frozen, sha-pinned) owns every execution
+✓ M-16: FINAL SCAN — no History DAG in the 3.16 surface: no HistoryManager reference in the stripped production bodies; transaction.js and correction.js remain byte-identical to their 3.15 accepted shas (the linear push-truncation implementation is untouched)
+✓ M-17: FINAL SCAN — no nested transactions: the production surface never opens a builder; the ONE-attempt-ONE-transaction contract is the engine's (frozen) and is proven live in L-7
+✓ M-5 (P-3 Scope): constraint evaluation reads ONLY the referenced objects — a constraint over [A,B] is blind to C, at the compliance arm AND at the safety gate
+✓ L-4: a size-class agenda (metric size.width) resolves the scale-to-target-size recipe but the plan refuses INSUFFICIENT_EVIDENCE — T06 is rule-less in the frozen derivation table — and the loop terminates UNFIXABLE (the disclosed boundary, never patched)
+✓ L-12: a critic that keeps reporting the violation is answered with NO_PROGRESS — the loop never claims VERIFIED without the authority, even when the substrate was actually corrected
+✓ L-13: a two-object, two-axis drift under an L-arrangement — alignLeft([A,B]) and alignTop([B,C]) both hold at acceptance; moving B right violates the first and moving C down violates the second; the loop sequences two single-axis T05 fixes to VERIFIED (each target's (metric, objectId) pair is unique — the disclosed agenda-calibration discipline)
+✓ M-3 (P-1 Determinism): the whole 3.16 chain is deterministic — identical substrate state yields byte-identical evaluation JSON, inference, and critique (Invariant 17)
+✓ M-6 (P-4 Non-Mutation): the 3.16 chain mutates NOTHING outside transactions — the canonical store snapshot is byte-identical across inference, compliance, and critique
+✓ L-1: a constraint agenda closes through the FROZEN 3.15 CorrectionEngine — TERMINATED/VERIFIED in exactly one T05 attempt, the §3 choreography intact
+✓ L-2: the loop's plan carried the constraint context — hardConstraintsPreserved names the hard equalHeight record; softTradeOffs records the violated strong alignLeft (the disclosed trade-off, never silent)
+✓ L-3: a HARD violated constraint whose pinned axis the fix must mutate is NEVER silently degraded — the plan refuses HARD_CONSTRAINT_REJECTED and the loop terminates CONSTRAINT_BLOCKED with zero attempts (P-5 REJECTED face)
+✓ L-5: a CONSTRAINT-category target hits the frozen zero-recipe table (CONSTRAINT -> CONSTRAINT_VIOLATION, zero recipes) — NO_CAPABILITY, honest UNFIXABLE, zero attempts
+✓ L-6: with NO constraint context on the request, the loop still closes (VERIFIED) and the plan makes NO preserved-constraints claim — honest absence, never a false safety record
+✓ L-7: the correction is ONE independent substrate transaction with a content-derived atx- id — distinct from the root and drift transactions; history grows by exactly one per attempt
+✓ L-8: §22 — the loop NEVER self-evaluates: the host critic is called exactly 1 + iterations times with the request document verbatim
+✓ L-9: the rollback arc under constraint context — a target pointing at the WRONG restoration value regresses the relation; §15 declares the regression, §32 undo restores the drifted state, and the constraint records are untouched by the rollback
+✓ L-11: the history stays LINEAR through a constraint-correction loop (Invariant 13 face) — one linear array, currentIndex at the tail, every transaction committed in sequence
+✓ L-14: the audit trail — the attempt carries the transactionId and the plan carries the §11 expectedImprovement (metric position.x, from 130 to 100); the HistoryManager is untouched by session bookkeeping
+✓ M-1 (§67 golden): the END-TO-END loop — document -> T19 -> accepted records -> planner pipeline -> drift transaction -> evaluation -> critic -> correction loop -> correction transaction -> re-evaluation -> VERIFIED, with all eleven evidence items live
+✓ M-7 (P-5 Hard Constraint): accepted hard constraints are never silently degraded — the gate REJECTS the conflicting fix (L-3 face), PRESERVES the non-conflicting hard record (golden face), and the store records survive the loop byte-identical
+✓ M-8 (P-6 Transaction): every store mutation in the golden is inside a committed transaction — the linear history covers creations + drift + correction and the arms hold no write path
+✓ M-9 (P-7 History): constraint corrections never produce non-linear history — undo restores without appending, and a post-undo push TRUNCATES the undone attempt (the invariant-13 signature)
+✓ L-10: loop determinism — two rebuilt fixtures produce normalized byte-identical outcome records (status, trail, attempt count, restoration values)
+✓ M-2 (§67 golden determinism): two full golden runs produce byte-identical canonical evidence traces (the disclosed identity-entropy projection)
+
+Tests: 106 total, 106 passed, 0 failed
+✔ tests/constraint-inference.test.mjs (260.216443ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 267.321477
