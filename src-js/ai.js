@@ -499,6 +499,26 @@ export function validateExpectedState(state){
   if (state.structure.grouped !== null && state.structure.grouped !== undefined && typeof state.structure.grouped !== 'boolean'){
     errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.structure.grouped must be null or boolean'));
   }
+  // PHASE 3.17: the optional semantic section rides on ExpectedState exactly
+  // like the 3.16 constraint section (above) — desired-state PROVENANCE, never
+  // canonical document state (Invariant 15). ABSENT by default: an
+  // ExpectedState without `semantic` validates exactly as before (the O-2
+  // byte-identical backward-compat pin). When present, `satisfied` mirrors the
+  // constraint arm's null/boolean admission (the evaluated verdict belongs to
+  // the later checkpoints, not to the Planner) and `expectations` is the
+  // accepted-record agenda array (Checkpoint B records, spec §55).
+  if (state.semantic !== undefined){
+    if (!isPlainObject(state.semantic)){
+      errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.semantic must be a plain object when present'));
+    } else {
+      if (state.semantic.satisfied !== null && state.semantic.satisfied !== undefined && typeof state.semantic.satisfied !== 'boolean'){
+        errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.semantic.satisfied must be null or boolean'));
+      }
+      if (state.semantic.expectations !== undefined && !Array.isArray(state.semantic.expectations)){
+        errors.push(createError(PlanningErrorCodes.INVALID_PARAMETER, 'ExpectedState.semantic.expectations must be an array when present'));
+      }
+    }
+  }
   return { valid: errors.length === 0, errors };
 }
 
@@ -869,9 +889,14 @@ function dispatchNonCreateRules(intent, context){
 
 // §15 API — deterministic ExpectedState construction. Throws PlanningError
 // (INVALID_INTENT) for an invalid intent; rejects a non-frozen context (§13).
+// PHASE 3.17: an optional semantic agenda on the context (context.semantic,
+// the Checkpoint-B accepted records) adds the additive ExpectedState.semantic
+// section (see the SEMANTIC EXPECTATION ARM at the end of this file); an
+// ABSENT agenda reproduces the pre-3.17 ExpectedState byte-identically.
 export function createExpectedState(intent, context){
   const es = buildExpectedState(intent); // validates; PlanningError(INVALID_INTENT) on bad intent
   requirePlanningContext(context);
+  applySemanticExpectation(es, context); // PHASE 3.17: additive semantic section (no-op without an agenda)
   return deepFreeze(es);
 }
 
@@ -1546,4 +1571,66 @@ export function verifyPlanStepsAgainstConstraints(plan, constraints){
     }
   });
   return deepFreeze({ status: conflicts.length > 0 ? 'CONFLICTS' : 'PRESERVED', conflicts });
+}
+
+// ============================================================================
+// PHASE 3.17 — SEMANTIC EXPECTATION ARM (the planner integration)
+// ============================================================================
+// The planner face of the semantic normalization session (Checkpoint B,
+// src-js/semantic-inference.js): the ACCEPTED records (status 'PROPOSED')
+// ride into the Planner as an optional PlanningContext.semantic array and
+// surface as an ADDITIVE ExpectedState.semantic section. The 3.16 constraint
+// pattern is mirrored exactly:
+//   - the agenda crosses the boundary through the generic §13 projection
+//     (createPlanningContext, ai.js:574-587) — plain data, no functions,
+//     deep-frozen — so createPlanningContext itself needs NO change;
+//   - the section rides on ExpectedState like the 3.16 constraint section
+//     does: it is desired-state PROVENANCE, never canonical document state
+//     (Invariant 15), and it is ABSENT without an agenda (the pre-3.17
+//     ExpectedState is reproduced byte-identically);
+//   - 'satisfied' stays the unevaluated null marker at construction — the
+//     Planner never invents a verdict (the 3.16 arrangement posture); a
+//     boolean is admitted by the shape guard for the later checkpoints.
+// The Planner stays READ-ONLY w.r.t. semantics: zero coupling to the
+// semantic-inference module (records arrive as frozen plain data), no
+// transactions, no store writes — the one-substrate import contract
+// (ai.js:55) is untouched.
+// ============================================================================
+
+/**
+ * Build the ExpectedState.semantic section from a semantic agenda (the
+ * optional PlanningContext.semantic array of Checkpoint-B normalized records).
+ *
+ * Only ACCEPTED records (plain objects with status 'PROPOSED') become
+ * expectations — refusal records (status 'REJECTED') and any non-record entry
+ * can never be promoted into desired state. Order is preserved verbatim;
+ * entries are carried as-is (the §13 snapshot owns the frozen copies; zero
+ * aliasing of any session structure).
+ *
+ * @param {Array} semanticRecords the PlanningContext.semantic agenda array
+ * @returns {{satisfied: null, expectations: any[]}} a frozen semantic section
+ * @throws PlanningError INVALID_PARAMETER when semanticRecords is not an array
+ *   (a malformed agenda is refused loudly, the §13 house style)
+ */
+export function buildSemanticExpectation(semanticRecords){
+  if (!Array.isArray(semanticRecords)){
+    throw new PlanningError(
+      PlanningErrorCodes.INVALID_PARAMETER,
+      'ExpectedState agenda: context.semantic must be an array of normalized semantic records when present'
+    );
+  }
+  const expectations = semanticRecords.filter(r => isPlainObject(r) && r.status === 'PROPOSED');
+  return deepFreeze({ satisfied: null, expectations });
+}
+
+/**
+ * Wire the optional semantic agenda into a freshly built (not yet frozen)
+ * ExpectedState. No agenda -> NO semantic section: the pre-3.17 shape is
+ * reproduced byte-identically (backward compat).
+ */
+function applySemanticExpectation(es, context){
+  const semantic = context ? context.semantic : undefined;
+  if (semantic === undefined) return es;
+  es.semantic = buildSemanticExpectation(semantic);
+  return es;
 }

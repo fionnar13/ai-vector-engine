@@ -1024,6 +1024,26 @@ export function evaluate(expectedState, documentContext, evaluationContext){
     metadata.constraintDeviations = compliance.constraintDeviations;
     metadata.constraintResults = compliance.results;
   }
+  // PHASE 3.17 — the semantic expectation arm (see the section header at the
+  // end of this file): the agenda rides in expected.semantic.expectations (the
+  // C-checkpoint accepted records); the ACTUAL role comes ONLY from the
+  // injected provider evaluationContext.getActualRole (DD-1) — evaluation
+  // never calls T20 and never reads a semantic store (§42/§50 posture).
+  const semanticAgenda = isPlainObject(expectedState.semantic) && Array.isArray(expectedState.semantic.expectations)
+    ? expectedState.semantic.expectations : null;
+  if (semanticAgenda !== null){
+    const semantic = semanticExpectationArm(semanticAgenda, evaluationContext);
+    deviations.push(...semantic.deviations);
+    evaluated.push('semantic');
+    // The blanket 'semantic' marker (unevaluatedExpectations) names the section
+    // evaluation could not open; once the arm runs, the per-expectation path
+    // entries replace it — the constraint.satisfied boolean-vs-compliance
+    // split, mirrored (DD-7).
+    metadata.unevaluatedExpectations = metadata.unevaluatedExpectations
+      .filter(entry => entry !== 'semantic')
+      .concat(semantic.unevaluated);
+    metadata.semanticResults = semantic.results;
+  }
   return createEvaluationResult({ expected: expectedState, actual, deviations, evaluated, metadata });
 }
 
@@ -1171,4 +1191,138 @@ function constraintCompliance(constraints, actualState, tolerance){
       property: spec.property, expected, actual: violated.actual, error: violated.error, tolerance }));
   }
   return { deviations, results, constraintDeviations };
+}
+
+// ============================================================================
+// PHASE 3.17 — SEMANTIC EXPECTATION EVALUATION (internal arm; NO new exports —
+// the 12-export A/B-era surface stays pinned, evaluation-critic.test.mjs:1643)
+// ============================================================================
+// Spec §57 (Checkpoint D): semantic expectation -> the committed doc state ->
+// evaluation result. The arm mirrors the 3.16 constraint-compliance arm: it
+// rides INSIDE the §55 evaluate() entry, is pure / read-only / deterministic,
+// and self-reports everything it cannot measure (§19/§53 honesty).
+//
+// THE ACTUAL-ROLE QUESTION (the D-scope decision, DD-1): T20 is the only
+// role-inference tool (tools.js:973-999), and calling it from inside
+// evaluation would create an evaluation->tools dependency AND execute a
+// proposal tool during evaluation. The arm therefore consumes an INJECTED
+// ROLE PROVIDER — evaluationContext.getActualRole(objectId) -> role string |
+// null | undefined — the same injection discipline the module already applies
+// to its entire read surface (evaluation.js:8-13, the doc-context stores) and
+// to evaluationContext.artboard (§17). The provider is validated (a function)
+// only when the arm runs, and is invoked EXACTLY ONCE per measurable
+// expectation, in agenda order — never cached, never reordered (§22).
+// With no provider the arm says UNEVALUABLE — it never guesses.
+//
+// STATUSES (the five §57 forms, only where actually supported):
+//   SATISFIED              expected role === provided actual role
+//   VIOLATED               both in-vocabulary, expected !== actual
+//   UNSUPPORTED            either side outside T20's 7-role emission set
+//   UNEVALUABLE            no role provider on the evaluation context
+//   INSUFFICIENT_EVIDENCE  the provider returned no role for the object
+// Deterministic machine reasons accompany every unresolved verdict
+// (NO_ROLE_PROVIDER / PROVIDER_RETURNED_NO_ROLE / EXPECTED_ROLE_UNSUPPORTED /
+// ACTUAL_ROLE_UNSUPPORTED); the compared pair carries reason null.
+//
+// RESULTS + DEVIATIONS (DD-4/DD-5): every expectation yields one total
+// null-normalized record {objectId, role, status, confidence, reason} in
+// metadata.semanticResults (agenda order, the §13 total-shape discipline);
+// VIOLATED additionally pushes ONE category:'semantic' deviation per
+// expectation. The category is RESERVED in DEVIATION_CATEGORIES
+// (evaluation.js:146, dormant per the header 'E6 semantic stays dormant') —
+// the 3.16 mirror of riding a reserved category, with NO semanticDeviations
+// sidecar needed because category 'semantic' is already self-identifying
+// (the constraint sidecar existed only because constraint deviations rode
+// category 'geometry', indistinguishable from E2 geometry deviations).
+// Deviation shape: property 'role', expected/actual the role strings,
+// delta/tolerance null (non-numeric comparison — the structure-arm
+// precedent), severity 'error', targetRef '$doc:'+objectId (the
+// constraint-arm convention, evaluation.js:1161).
+//
+// UNEVALUATED HONESTY (DD-7): the blanket 'semantic' marker produced by
+// unevaluatedExpectations() names the section evaluation could not open; once
+// the arm runs, per-expectation path entries 'semantic.expectations[i]' (one
+// per unverifiable expectation) replace it — the exact mirror of the
+// constraint.satisfied boolean-vs-compliance-request split.
+// ============================================================================
+
+// DD-3: T20's exact emission vocabulary (semantic.js emission sites; the BD-1
+// mirror) — LOCAL and frozen: no import from semantic.js or
+// semantic-inference.js, the constraint arm's localization pattern.
+const SEMANTIC_EMITTABLE_ROLES = deepFreeze(['text', 'heading', 'background', 'shape', 'icon', 'container', 'unknown']);
+
+function semanticExpectationShapeErrors(record){
+  const errors = [];
+  if (!isPlainObject(record)) return [createError(EvaluationErrorCodes.INVALID_EXPECTED_STATE, 'semantic expectation must be a plain object')];
+  if (!isNonEmptyString(record.objectId)) errors.push(createError(EvaluationErrorCodes.INVALID_EXPECTED_STATE, 'semantic expectation .objectId must be a non-empty string'));
+  if (!isNonEmptyString(record.role)) errors.push(createError(EvaluationErrorCodes.INVALID_EXPECTED_STATE, 'semantic expectation .role must be a non-empty string (the T20 emission vocabulary)'));
+  if (record.confidence !== undefined && record.confidence !== null && !isFiniteNumber(record.confidence)){
+    errors.push(createError(EvaluationErrorCodes.INVALID_EXPECTED_STATE, 'semantic expectation .confidence must be null or a finite number'));
+  }
+  return errors;
+}
+
+// The arm core: the C-checkpoint agenda + the evaluation context -> {results,
+// deviations, unevaluated}. Pure, read-only, deterministic (§22).
+function semanticExpectationArm(agenda, evaluationContext){
+  const provider = evaluationContext.getActualRole;
+  if (provider !== undefined && typeof provider !== 'function'){
+    throw new EvaluationError(
+      EvaluationErrorCodes.INVALID_EVALUATION_CONTEXT,
+      'evaluationContext.getActualRole must be a function (objectId -> role string | null | undefined) when provided — the injected role provider is the only actual-role source (spec §57)'
+    );
+  }
+  const results = [];
+  const deviations = [];
+  const unevaluated = [];
+  agenda.forEach((record, index) => {
+    const shape = semanticExpectationShapeErrors(record);
+    if (shape.length > 0){
+      throw new EvaluationError(
+        EvaluationErrorCodes.INVALID_EXPECTED_STATE,
+        `semantic expectation arm: invalid expectation at expectations[${index}]`,
+        shape
+      );
+    }
+    const confidence = isFiniteNumber(record.confidence) ? record.confidence : null;
+    if (!SEMANTIC_EMITTABLE_ROLES.includes(record.role)){
+      results.push(deepFreeze({ objectId: record.objectId, role: record.role, status: 'UNSUPPORTED', confidence, reason: 'EXPECTED_ROLE_UNSUPPORTED' }));
+      unevaluated.push(`semantic.expectations[${index}]`);
+      return;
+    }
+    if (provider === undefined){
+      results.push(deepFreeze({ objectId: record.objectId, role: record.role, status: 'UNEVALUABLE', confidence, reason: 'NO_ROLE_PROVIDER' }));
+      unevaluated.push(`semantic.expectations[${index}]`);
+      return;
+    }
+    const actualRole = provider(record.objectId);
+    if (!isNonEmptyString(actualRole)){
+      results.push(deepFreeze({ objectId: record.objectId, role: record.role, status: 'INSUFFICIENT_EVIDENCE', confidence, reason: 'PROVIDER_RETURNED_NO_ROLE' }));
+      unevaluated.push(`semantic.expectations[${index}]`);
+      return;
+    }
+    if (!SEMANTIC_EMITTABLE_ROLES.includes(actualRole)){
+      results.push(deepFreeze({ objectId: record.objectId, role: record.role, status: 'UNSUPPORTED', confidence, reason: 'ACTUAL_ROLE_UNSUPPORTED' }));
+      unevaluated.push(`semantic.expectations[${index}]`);
+      return;
+    }
+    if (actualRole === record.role){
+      results.push(deepFreeze({ objectId: record.objectId, role: record.role, status: 'SATISFIED', confidence, reason: null }));
+      return;
+    }
+    results.push(deepFreeze({ objectId: record.objectId, role: record.role, status: 'VIOLATED', confidence, reason: null }));
+    deviations.push(createDeviation({
+      category: 'semantic',
+      property: 'role',
+      expected: record.role,
+      actual: actualRole,
+      delta: null,
+      tolerance: null,
+      severity: 'error',
+      objectId: record.objectId,
+      targetRef: '$doc:' + record.objectId,
+      message: `semantic role expectation violated: object '${record.objectId}' expected role '${record.role}', observed role '${actualRole}'`
+    }));
+  });
+  return { results, deviations, unevaluated };
 }

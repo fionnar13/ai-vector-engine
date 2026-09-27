@@ -1,0 +1,75 @@
+=== H-3: src/core integrity ===
+-- git status --porcelain -- src/core:
+""
+-- git diff HEAD --stat -- src/core:
+""
+src/core file count: 178
+src/core aggregate sha256: 6ac8529c6f23639e998ed556d734bd54f886bf1ffd9fac5b5b99dc7099da71bc
+
+=== H-4: dependency audit ===
+package.json: {
+  "name": "ai-native-vector-graphics-engine",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "bash scripts/run-suite.sh",
+    "typecheck": "npx -y -p typescript tsc --noEmit"
+  }
+}
+npm ls --depth=0:
+ai-native-vector-graphics-engine@0.1.0 /home/z/my-project/ai-vector-engine
+└── (empty)
+
+
+
+=== H-6: history linearity carriers ===
+transaction.js sha256: 5ec1369b16c1294101e19d45bece4250be5fdcb1d1878eb07d6de87e5c0ea5e4
+transaction.js lines: 638
+transaction.js:156>   list(){ return Array.from(this.factories.keys()); }
+transaction.js:157> }
+transaction.js:158> 
+transaction.js:159> export class HistoryManager {
+transaction.js:160>   constructor(){ this.transactions=[]; this.currentIndex=-1; }
+transaction.js:161>   canUndo(){ return this.currentIndex>=0; }
+transaction.js:162>   canRedo(){ return this.currentIndex < this.transactions.length-1; }
+transaction.js:163>   push(tx){ if(tx.status!=='committed') throw new Error('Only committed transactions can be pushed'); if(this.currentIndex < this.transactions.length-1){ this.transactions=this.transactions.slice(0,this.currentIndex+1); } this.transactions.push(tx); this.currentIndex=this.transactions.length-1; }
+transaction.js:164>   current(){ if(this.currentIndex<0||this.currentIndex>=this.transactions.length) return null; return this.transactions[this.currentIndex]; }
+transaction.js:165>   getAll(){ return [...this.transactions]; }
+transaction.js:166>   getCurrentIndex(){ return this.currentIndex; }
+transaction.js:167>   getTransactionToUndo(){ if(!this.canUndo()) return null; return this.transactions[this.currentIndex]; }
+transaction.js:168>   getTransactionToRedo(){ if(!this.canRedo()) return null; return this.transactions[this.currentIndex+1]; }
+transaction.js:169>   moveBack(){ if(!this.canUndo()) throw new Error('HISTORY_EMPTY'); this.currentIndex--; }
+transaction.js:170>   moveForward(){ if(!this.canRedo()) throw new Error('HISTORY_NO_REDO'); this.currentIndex++; }
+transaction.js:171>   clear(){ this.transactions=[]; this.currentIndex=-1; }
+transaction.js:172>   size(){ return this.transactions.length; }
+transaction.js:173> }
+transaction.js:174> 
+transaction.js:175> export class EventBus {
+push-truncation present: false
+
+=== H-8: stub scan over the 3.17 surface ===
+semantic-inference.js: ZERO stub/placeholder markers
+semantic-inference.README.md: ZERO stub/placeholder markers
+ai.js: ai.js:880: // [CHECKPOINT-C-DISPATCH] Rules E/F/G/H routing (spec §17/§41-C). Stub-kill | ai.js:920: // [CHECKPOINT-D-POSTCOND] createPlan emitted-toolId resolution post-condition (stub-kill anchor) | ai.js:1139: // [CHECKPOINT-D-INPUTSCHEMA] declared-inputSchema validation (stub-kill anchor) | ai.js:1188: // [CHECKPOINT-D-RESOLUTION] resolution + category + declared-inputSchema block (stub-kill anchor)
+evaluation.js: ZERO stub/placeholder markers
+critic.js: ZERO stub/placeholder markers
+
+=== H-9: fresh git summary ===
+-- git diff HEAD --numstat:
+87	0	src-js/ai.js
+50	0	src-js/critic.js
+154	0	src-js/evaluation.js
+
+-- git status --short:
+ M src-js/ai.js
+ M src-js/critic.js
+ M src-js/evaluation.js
+?? scripts/phase3.17-evidence/
+?? src-js/semantic-inference.README.md
+?? src-js/semantic-inference.js
+?? tests/semantic-inference.test.mjs
+
+-- HEAD:
+256999637e7925c7f249bd2e8343741295ab1cf2
+-- branch:
+feat/phase-3.16-constraint-inference

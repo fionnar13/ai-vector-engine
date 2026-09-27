@@ -386,11 +386,17 @@ function transformProposal(d, expected){
 // the no-proposal outcomes declared in the module header (§28: the Critic
 // must not bypass the architecture simply because a correction appears
 // obvious).
+// PHASE 3.17: 'semantic' now routes EXPLICITLY to the same null outcome —
+// semanticProposalFor below owns the routing and documents the decline
+// decision; existence/structure keep falling through verbatim.
 function proposalFor(d, result){
   if (d.category === 'geometry') return geometryProposal(d, result.expected);
   if (d.category === 'appearance') return appearanceProposal(d, result.expected);
   if (d.category === 'placement') return placementProposal(d);
   if (d.category === 'transform') return transformProposal(d, result.expected);
+  // PHASE 3.17 — the semantic branch (the explicit routing of the §58 decline;
+  // see the section header at the end of this file).
+  if (d.category === 'semantic') return semanticProposalFor(d);
   return null;
 }
 
@@ -506,4 +512,48 @@ function constraintProposalFor(d, result){
     intent: { type: 'transform', targets: [target], operation: 'translate', params: { x: dx, y: dy } },
     reason: `translate '${target}' by (${dx},${dy}) to satisfy the accepted ${type} constraint '${constraintId}'`
   };
+}
+
+// ============================================================================
+// PHASE 3.17 — THE SEMANTIC RULE (inside the §23 proposeCorrections rule
+// engine; NO new exports — the 6-export C/D-era surface stays pinned).
+// ============================================================================
+// Spec §58 (Checkpoint E): semantic deviation -> Critic -> diagnostic output.
+// The five §58 duties decide the rule, and every one of them points the same
+// way — the deviation is SURFACED and NEVER patched:
+//
+//   avoid unsupported diagnosis: no tool supports semantic mutation (the
+//     module header, in place since 3.14), correction.js carries zero
+//     semantic recipes (the A-9 survey), and spec §24 ends the loop with
+//     NO_CORRECTION_CAPABILITY. A correction proposal for a semantic
+//     deviation would have to fake a capability request — §28 requires every
+//     proposal to cite the planning capability it maps to, and none exists.
+//     The 3.16 constraint rule faced the same situation for the size/distance
+//     classes and declined the same way ("surfaced, never patched").
+//   avoid invented confidence: proposals carry the rule-derived constant 1
+//     (exact restoration). A semantic deviation has no restoration, so no
+//     proposal is built and the constant is never applied to it.
+//   preserve evidence + provenance: the diagnosis stays exactly where the
+//     evaluation arm put it — metadata.semanticResults (statuses, reasons,
+//     the verbatim confidence) and the verbatim Checkpoint-B agenda on
+//     result.expected.semantic.expectations (source 'T20', evidence rows).
+//     The critic consumes the §12 record read-only and returns proposals
+//     that never reference a semantic deviation, so nothing is stripped,
+//     duplicated, or re-shaped.
+//   avoid mutation: the rule touches only the plain data it is handed.
+//
+// CONTRACT NOTE (the E-scope decision): a "diagnostic proposal" riding the
+// 7-key contract is impossible without faking a capability — the proposal
+// validator rejects any intent.type outside the five planning capabilities —
+// and a new output field would break the pinned {evaluationResult, proposals}
+// pair and the frozen-array §56 contract. The sidecar IS the diagnostic
+// output; the loop's own NO_CORRECTION_CAPABILITY path (Checkpoint F) closes
+// the boundary.
+// ============================================================================
+
+// The semantic rule (the 3.17 arm of the rule dispatch). ALWAYS declines —
+// the one fixed outcome of the §58 survey above; every semantic deviation is
+// already surfaced by the evaluation record this rule receives.
+function semanticProposalFor(d){
+  return null;
 }
