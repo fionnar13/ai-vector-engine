@@ -1,0 +1,117 @@
+✓ N-1: the module exists and exports createInferenceSession
+✓ N-2: session API shape — ingest/getRecords/getRefusals/getRegistry
+✓ N-3: normalized record shape matches BD-1..BD-6 (exact key set, field mapping)
+✓ N-4: role vocabulary = T20's 7 emitted roles — no VALID_ROLES mapping, no aliases (BD-1)
+✓ N-5: content-derived id determinism — same content, same id; entropy and key order irrelevant; evidence moves the id (BD-5)
+✓ N-6: confidence preserved verbatim — no rounding, no clamping, NO threshold (BD-3, spec §36)
+✓ N-7: evidence preserved verbatim — multi-row, empty, and missing; copied, never aliased (BD-4)
+✓ N-8: source === 'T20' — the tool is the origin, 'heuristic' is the algorithm (BD-4, spec §37)
+✓ N-9: status === 'PROPOSED' on every accepted record
+✓ N-10: no entropy in normalized output — no RNG/wall-clock fields, no RNG/wall-clock in the module (BD-5, spec §19)
+✓ N-11: unsupported role -> refusal per BD-6 (+ T20 failure envelope -> T20_FAILED)
+✓ N-12: malformed T20 result -> MALFORMED refusal — never throws
+✓ N-13: empty proposal set -> empty records, empty refusals (honest no-op)
+✓ N-14: unknown role -> accepted as a real role (BD-2a), engine no-evidence shape verbatim
+✓ N-15: deep-frozen records AND refusals; upstream is a session-owned frozen copy — the caller object is never frozen (BD-6, no aliasing)
+✓ N-16: zero imports — static source scan of src-js/semantic-inference.js (spec §44)
+✓ N-17: determinism — two sessions over the same ingest sequence produce byte-identical registries (spec §19)
+✓ O-1: PlanningContext accepts an optional `semantic` array; deep-frozen (CD-5, the 3.16 mirror)
+✓ O-2: existing PlanningContext callers unchanged — no `semantic` field -> byte-identical behavior (CD-2)
+✓ O-3: ExpectedState.semantic.satisfied admits null and boolean — the 3.16 constraint.satisfied mirror (CD-1)
+✓ O-4: ExpectedState.semantic.expectations is an OPTIONAL array (absent -> valid; non-array -> refused)
+✓ O-5: the Planner produces a deterministic Plan carrying the accepted semantic expectations (CD-1)
+✓ O-6: the Planner does NOT mutate the SemanticStore / inference session (zero coupling, CD-6)
+✓ O-7: the Planner does NOT open transactions (CD-6)
+✓ O-8: the Planner does NOT touch geometry/appearance/object stores (the one-substrate contract, CD-6)
+✓ O-9: round-trip T20 -> ingest -> accepted records -> PlanningContext.semantic -> createPlan -> expectedState.semantic.expectations (CD-1/CD-3)
+✓ O-10: two createPlan calls with identical inputs produce byte-identical plans (Invariant 17); the agenda participates in plan identity
+✓ O-11: refusal records do NOT enter expectedState.semantic.expectations — even when the caller hands over the whole registry (CD-3)
+✓ O-12: backward compat — the existing ai.test.mjs suite (131 tests) remains GREEN
+✗ P-1: metadata.semanticResults present when expected.semantic.expectations exists (total shape, agenda order, DD-5/DD-6): semanticResults is an array on the metadata sidecar
+Error: semanticResults is an array on the metadata sidecar
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:185:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:768:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:184:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:764:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ P-2: SATISFIED case — expected role === provided actual role (DD-1/DD-2): Cannot read properties of undefined (reading '0')
+TypeError: Cannot read properties of undefined (reading '0')
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:780:44
+    at test (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:184:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:777:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ P-3: VIOLATED case — expected !== actual -> one category:'semantic' deviation (DD-4) + result DEVIATION: Cannot read properties of undefined (reading '0')
+TypeError: Cannot read properties of undefined (reading '0')
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:793:44
+    at test (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:184:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:790:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ P-4: UNEVALUABLE case — no role provider -> NO_ROLE_PROVIDER, listed in unevaluatedExpectations (DD-7); non-function provider refused (DD-8): Cannot read properties of undefined (reading '0')
+TypeError: Cannot read properties of undefined (reading '0')
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:814:44
+    at test (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:184:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:811:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ P-5: UNSUPPORTED case — role outside T20's 7-role emission set, both sides (DD-2/DD-3); the provider is never trusted for it: Cannot read properties of undefined (reading '0')
+TypeError: Cannot read properties of undefined (reading '0')
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:835:51
+    at test (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:184:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:830:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ P-6: INSUFFICIENT_EVIDENCE case — provider returns null -> PROVIDER_RETURNED_NO_ROLE, no invented deviation (DD-2): Cannot read properties of undefined (reading '0')
+TypeError: Cannot read properties of undefined (reading '0')
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:855:46
+    at test (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:184:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:851:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ P-7: multi-expectation — 3 expectations -> 3 semanticResults, agenda order preserved (DD-5): Cannot read properties of undefined (reading 'length')
+TypeError: Cannot read properties of undefined (reading 'length')
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:878:14
+    at test (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:184:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:864:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ P-8: no false verification — an unmeasurable expectation can never become SATISFIED (§53 honesty): Cannot read properties of undefined (reading '0')
+TypeError: Cannot read properties of undefined (reading '0')
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:896:46
+    at test (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:184:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:887:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ P-9: determinism — identical inputs -> identical semanticResults + deviation ids; provider invoked exactly once per expectation (DD-1): the provider is invoked exactly once per expectation, in agenda order: [] !== ["obj-p1","obj-p1"]
+Error: the provider is invoked exactly once per expectation, in agenda order: [] !== ["obj-p1","obj-p1"]
+    at deepEq (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:187:91)
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:920:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:184:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:905:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ P-10: backward compat — evaluation-critic 120/120 + constraint-inference 107/107 (the 14 J-tests inside) remain GREEN
+✓ P-11: no semantic.js / semantic-inference.js import in evaluation.js (static scan); the 12-export surface gains nothing
+✓ P-12: evaluation.js does NOT mutate semantic state, the agenda, or any store (frozen fixtures survive evaluate byte-identically)
+✗ P-13: semanticResults deep-frozen and never aliased to the input agenda (the §12 frozen-result contract): Cannot read properties of undefined (reading '0')
+TypeError: Cannot read properties of undefined (reading '0')
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:963:41
+    at test (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:184:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:959:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ P-14: role provider optional — omission (and provider-without-agenda) preserves existing evaluate() behavior; the dormant blanket marker stays
+
+Tests: 43 total, 33 passed, 10 failed

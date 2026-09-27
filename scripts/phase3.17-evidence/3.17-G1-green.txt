@@ -1,0 +1,98 @@
+✓ N-1: the module exists and exports createInferenceSession
+✓ N-2: session API shape — ingest/getRecords/getRefusals/getRegistry
+✓ N-3: normalized record shape matches BD-1..BD-6 (exact key set, field mapping)
+✓ N-4: role vocabulary = T20's 7 emitted roles — no VALID_ROLES mapping, no aliases (BD-1)
+✓ N-5: content-derived id determinism — same content, same id; entropy and key order irrelevant; evidence moves the id (BD-5)
+✓ N-6: confidence preserved verbatim — no rounding, no clamping, NO threshold (BD-3, spec §36)
+✓ N-7: evidence preserved verbatim — multi-row, empty, and missing; copied, never aliased (BD-4)
+✓ N-8: source === 'T20' — the tool is the origin, 'heuristic' is the algorithm (BD-4, spec §37)
+✓ N-9: status === 'PROPOSED' on every accepted record
+✓ N-10: no entropy in normalized output — no RNG/wall-clock fields, no RNG/wall-clock in the module (BD-5, spec §19)
+✓ N-11: unsupported role -> refusal per BD-6 (+ T20 failure envelope -> T20_FAILED)
+✓ N-12: malformed T20 result -> MALFORMED refusal — never throws
+✓ N-13: empty proposal set -> empty records, empty refusals (honest no-op)
+✓ N-14: unknown role -> accepted as a real role (BD-2a), engine no-evidence shape verbatim
+✓ N-15: deep-frozen records AND refusals; upstream is a session-owned frozen copy — the caller object is never frozen (BD-6, no aliasing)
+✓ N-16: zero imports — static source scan of src-js/semantic-inference.js (spec §44)
+✓ N-17: determinism — two sessions over the same ingest sequence produce byte-identical registries (spec §19)
+✓ O-1: PlanningContext accepts an optional `semantic` array; deep-frozen (CD-5, the 3.16 mirror)
+✓ O-2: existing PlanningContext callers unchanged — no `semantic` field -> byte-identical behavior (CD-2)
+✓ O-3: ExpectedState.semantic.satisfied admits null and boolean — the 3.16 constraint.satisfied mirror (CD-1)
+✓ O-4: ExpectedState.semantic.expectations is an OPTIONAL array (absent -> valid; non-array -> refused)
+✓ O-5: the Planner produces a deterministic Plan carrying the accepted semantic expectations (CD-1)
+✓ O-6: the Planner does NOT mutate the SemanticStore / inference session (zero coupling, CD-6)
+✓ O-7: the Planner does NOT open transactions (CD-6)
+✓ O-8: the Planner does NOT touch geometry/appearance/object stores (the one-substrate contract, CD-6)
+✓ O-9: round-trip T20 -> ingest -> accepted records -> PlanningContext.semantic -> createPlan -> expectedState.semantic.expectations (CD-1/CD-3)
+✓ O-10: two createPlan calls with identical inputs produce byte-identical plans (Invariant 17); the agenda participates in plan identity
+✓ O-11: refusal records do NOT enter expectedState.semantic.expectations — even when the caller hands over the whole registry (CD-3)
+✓ O-12: backward compat — the existing ai.test.mjs suite (131 tests) remains GREEN
+✓ P-1: metadata.semanticResults present when expected.semantic.expectations exists (total shape, agenda order, DD-5/DD-6)
+✓ P-2: SATISFIED case — expected role === provided actual role (DD-1/DD-2)
+✓ P-3: VIOLATED case — expected !== actual -> one category:'semantic' deviation (DD-4) + result DEVIATION
+✓ P-4: UNEVALUABLE case — no role provider -> NO_ROLE_PROVIDER, listed in unevaluatedExpectations (DD-7); non-function provider refused (DD-8)
+✓ P-5: UNSUPPORTED case — role outside T20's 7-role emission set, both sides (DD-2/DD-3); the provider is never trusted for it
+✓ P-6: INSUFFICIENT_EVIDENCE case — provider returns null -> PROVIDER_RETURNED_NO_ROLE, no invented deviation (DD-2)
+✓ P-7: multi-expectation — 3 expectations -> 3 semanticResults, agenda order preserved (DD-5)
+✓ P-8: no false verification — an unmeasurable expectation can never become SATISFIED (§53 honesty)
+✓ P-9: determinism — identical inputs -> identical semanticResults + deviation ids; provider invoked exactly once per expectation (DD-1)
+✓ P-10: backward compat — evaluation-critic 120/120 + constraint-inference 107/107 (the 14 J-tests inside) remain GREEN
+✓ P-11: no semantic.js / semantic-inference.js import in evaluation.js (static scan); the 12-export surface gains nothing
+✓ P-12: evaluation.js does NOT mutate semantic state, the agenda, or any store (frozen fixtures survive evaluate byte-identically)
+✓ P-13: semanticResults deep-frozen and never aliased to the input agenda (the §12 frozen-result contract)
+✓ P-14: role provider optional — omission (and provider-without-agenda) preserves existing evaluate() behavior; the dormant blanket marker stays
+✓ Q-1: proposeCorrections accepts an EvaluationResult carrying semantic deviations; non-semantic rules keep working in the same pass (EE-1)
+✓ Q-2: a VIOLATED semantic deviation produces NO proposal (the §28 decline, EE-1); the diagnostic signal rides the composed output (EE-2); the decline is routed EXPLICITLY (EE-3)
+✓ Q-3: SATISFIED semantic results produce NO deviation and NO proposal
+✓ Q-4: UNEVALUABLE / UNSUPPORTED / INSUFFICIENT_EVIDENCE produce NO deviation and NO proposal; the honest signal stays on the sidecar (EE-2)
+✓ Q-5: every emitted proposal uses the existing 7-key contract; none references a semantic deviationId (EE-1)
+✓ Q-6: no new exports in critic.js — the 6-export C/D-era surface gains nothing (EE-7)
+✓ Q-7: critic.js does NOT mutate any store or the consumed result (frozen fixtures survive byte-identically, EE-5)
+✓ Q-8: critic.js does NOT open transactions (static scan + behavioral, EE-6)
+✓ Q-9: critic.js does NOT import correction.js or semantic.js (static scan, EE-7)
+✓ Q-10: determinism — two proposeCorrections calls with identical inputs produce identical output (§29/§30)
+✓ Q-11: backward compat — evaluation-critic 120/120 + constraint-inference 107/107 (the 14 J-tests + 14 K-tests inside) remain GREEN
+✓ Q-12: semantic diagnosis preserves evidence + provenance (source T20, evidence, confidence) where available; no invented confidence (EE-4/EE-5)
+✓ R-1: a semantic deviation reaches the Correction Loop through the existing boundary (the §7 CorrectionTarget agenda over the REAL B->D chain)
+✓ R-2: the loop's capability resolution sees the SEMANTIC_ERROR root cause (CATEGORY_TO_ROOT_CAUSE; behavioral via the ledger)
+✓ R-3: capability resolution produces NO_CAPABILITY (per A-9: zero recipes for SEMANTIC_ERROR); the frozen resolution record, pinned verbatim
+✓ R-4: the loop terminates honestly — TERMINATED / UNFIXABLE per the disclosure-39 mapping; the no-cycle rule keeps the session at IDLE (FD-4/FD-5)
+✓ R-5: no transaction is opened for a semantic deviation (no capability -> no attempt); every substrate counter stays at zero (FD-6)
+✓ R-6: history remains linear (Invariant 13) — zero corrections, zero iterations, the state trail stays ['IDLE'], one fingerprint
+✓ R-7: no direct Store mutation (Invariant 8) — the engine's ONLY document contact is the single critic consultation (read-delta = exactly one evaluate)
+✓ R-8: determinism — two full pipelines produce identical outcomes (Invariant 19)
+✓ R-9: the honest diagnostic reaches the loop via the correct channel — the D-1 sidecar record rides target.evidence verbatim; session-local frozen snapshot; ledger traceability (FD-2/FD-7)
+✓ R-10: the existing correction.test.mjs (144 tests) remains GREEN — no regression from the 3.17 surface
+✓ R-11: backward compat — the 1105 baseline components hold (constraint-inference 107, ai 131, evaluation-critic 120; counted 943 + gates in the final regression run)
+✓ R-12: the Correction Loop does NOT import semantic.js or semantic-inference.js (static scan: correction.js has ZERO static imports at all)
+✓ S-D-1: no filesystem access anywhere in the 3.17 surface (stripped bodies: no fs word, no require, no node: specifier; every static import relative; correction.js has ZERO imports)
+✓ S-D-2: no network access anywhere in the 3.17 surface (stripped bodies: no fetch / XMLHttpRequest / WebSocket / raw URL)
+✓ S-D-3: no LLM calls anywhere in the 3.17 surface (stripped bodies: no openai / anthropic / llm / completion / embedding / api_key vocabulary — correction.js's comment-prose tokens strip to zero)
+✓ S-D-4: no direct Store mutation in the 3.17 surface — the four PURE files carry no mutation-call form and no store/SceneGraph construction; the Correction leg is proven behaviorally (S-A-5/S-A-7: zero transactions, zero store deltas)
+✓ S-D-5: no direct History mutation in the 3.17 surface — no HistoryManager vocabulary in the four PURE files; the engine's frozen rollback-pointer probe is read-only and was never reached (S-A-6: zero appends)
+✓ S-D-7: no new runtime dependencies — package.json is byte-identical to HEAD; the 3.17 production files import only relative specifiers; the test file imports only relative modules and the three declared node: builtins
+✓ S-D-8: src/core is UNCHANGED — zero git deltas over the frozen core tree; the frozen 3.17 boundary files (correction/constraints/transaction/tools/semantic) are equally untouched
+✓ S-A-1: the golden pipeline executes END-TO-END — real T01 creation, real T20, real normalization, real planner carriage, real acceptance, real drift transaction, real evaluation, real critic, real frozen loop (§60)
+✓ S-A-2: each step produces the expected artifact — proposal, record, expectation, satisfaction, deviation, no-proposal diagnosis, NO_CAPABILITY refusal, honest termination
+✓ S-A-4: honest termination — NO_CAPABILITY resolved, TERMINATED/UNFIXABLE, the session stays IDLE, the verdict rides the ENGINE (SG-1)
+✓ S-A-5: zero transactions opened for the semantic deviation — the correction leg never reaches the substrate (the live proof of the §24 boundary)
+✓ S-A-6: history remains linear — strictly appended, no loop entries, no session transitions (Invariant 13 over the golden)
+✓ S-A-7: all stores unchanged by the correction leg — and unchanged by every non-mutating semantic leg (inference, normalization, planning, acceptance, evaluation)
+✓ S-B-1: drift -> attempted correction (capability resolution) -> no improvement -> termination/rollback per §30 — the live sequence over the golden
+✓ S-B-3: no oscillation — the loop cannot oscillate over a NO_CAPABILITY target (zero iterations, zero attempts, the frozen policy forbids oscillation recovery)
+✓ S-B-4: the fingerprint trail is bounded — one entry against the frozen policy budget; the ledgers are bounded too
+✓ S-C-1: P1 no direct mutation — semantic inference/normalization/planning/acceptance/evaluation mutate NOTHING; the drift transaction is the timeline's only writer
+✓ S-C-3: P3 unsupported-role refusal — an unsupported role cannot even ENTER the desired state, and cannot become verified even if hand-carried
+✓ S-C-4: P4 provenance preservation — the provenance chain T20 proposal -> record -> sidecar -> loop evidence is verbatim end to end
+✓ S-C-5: P5 confidence preservation — the provided confidence is never silently replaced (no rounding, no clamping, no threshold, no constant)
+✓ S-C-6: P6 evaluation honesty — unevaluable semantic state can NEVER become satisfied (no provider -> UNEVALUABLE; null provider -> INSUFFICIENT_EVIDENCE; both invent nothing)
+✓ S-C-7: P7 correction verification — nothing is accepted without post-mutation evaluation: the loop's ONLY world view is the critic's post-drift evaluation, and it executed nothing
+✓ S-C-8: P8 rollback safety — the pre-attempt state persists untouched (zero attempts -> zero rollbacks needed); the frozen rollback policy exists but was never triggered
+✓ S-C-9: P9 linear history — the golden's history is a strictly append-only sequence; the loop appended nothing (no History DAG, Invariant 13)
+✓ S-C-10: P10 planner purity — planning over the golden records mutates NO canonical state; the context is deep-frozen; the plan carries the agenda
+✓ S-D-6: no nested transactions in the 3.17 surface — no begin-call form in the four PURE files; every golden transaction is a root transaction (parentId null) and the loop opened none
+✓ S-B-2: this path IS the S-A path — with zero semantic capability the §30 second sequence always lands on the same honest terminus (structural identity across runs)
+✓ S-C-2: P2 deterministic normalization — the SAME real T20 envelope normalizes byte-identically in independent sessions; two golden runs normalize identically (modulo substrate identity)
+✓ S-A-3: determinism — two full golden runs produce byte-identical canonical outcome projections (the SG-6 identity-entropy projection, the 3.16 M-2 form)
+
+Tests: 96 total, 96 passed, 0 failed

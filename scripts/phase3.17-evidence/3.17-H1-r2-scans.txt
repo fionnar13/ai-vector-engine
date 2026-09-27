@@ -1,0 +1,35 @@
+=== H-5: network / filesystem / LLM scan (r2, stripped bodies, whole-file scope) ===
+semantic-inference.js: ZERO fs/network/LLM hits
+semantic-inference.js: static import specifiers -> NONE
+ai.js: ZERO fs/network/LLM hits
+ai.js: static import specifiers -> ./tools.js
+evaluation.js: ZERO fs/network/LLM hits
+evaluation.js: static import specifiers -> ./geometry.js, ./bbox.js
+critic.js: ZERO fs/network/LLM hits
+critic.js: static import specifiers -> ./evaluation.js
+correction.js: ZERO fs/network/LLM hits
+correction.js: static import specifiers -> NONE
+
+=== H-7: transaction boundary scan (r2, static legs) ===
+semantic-inference.js: mutation-method call forms -> NONE
+semantic-inference.js: transaction begin-call forms -> NONE
+semantic-inference.js: HistoryManager vocabulary -> NONE
+ai.js: mutation-method call forms -> NONE
+ai.js: transaction begin-call forms -> NONE
+ai.js: HistoryManager vocabulary -> NONE
+evaluation.js: mutation-method call forms -> NONE
+evaluation.js: transaction begin-call forms -> NONE
+evaluation.js: HistoryManager vocabulary -> NONE
+critic.js: mutation-method call forms -> NONE
+critic.js: transaction begin-call forms -> NONE
+critic.js: HistoryManager vocabulary -> NONE
+behavioral legs (one-attempt-one-transaction, root-only transactions, zero store deltas) -> PROVEN by r2 GREEN: S-A-5/S-A-6/S-A-7, S-B-1, S-D-4/S-D-5/S-D-6 (97/97 semantic suite this run)
+
+=== H-8: stub/placeholder scan (r2, hunk-aware) ===
+semantic-inference.js: ZERO stub/placeholder markers
+ai.js: ZERO stub/placeholder markers
+evaluation.js: ZERO stub/placeholder markers
+critic.js: ZERO stub/placeholder markers
+semantic-inference.js: 312 lines, ALL new — ZERO tolerance, verdict above
+
+R2 STATIC SCAN VERDICT: ALL CLEAN (0 violations)

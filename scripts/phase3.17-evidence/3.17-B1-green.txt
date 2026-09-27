@@ -1,0 +1,19 @@
+✓ N-1: the module exists and exports createInferenceSession
+✓ N-2: session API shape — ingest/getRecords/getRefusals/getRegistry
+✓ N-3: normalized record shape matches BD-1..BD-6 (exact key set, field mapping)
+✓ N-4: role vocabulary = T20's 7 emitted roles — no VALID_ROLES mapping, no aliases (BD-1)
+✓ N-5: content-derived id determinism — same content, same id; entropy and key order irrelevant; evidence moves the id (BD-5)
+✓ N-6: confidence preserved verbatim — no rounding, no clamping, NO threshold (BD-3, spec §36)
+✓ N-7: evidence preserved verbatim — multi-row, empty, and missing; copied, never aliased (BD-4)
+✓ N-8: source === 'T20' — the tool is the origin, 'heuristic' is the algorithm (BD-4, spec §37)
+✓ N-9: status === 'PROPOSED' on every accepted record
+✓ N-10: no entropy in normalized output — no RNG/wall-clock fields, no RNG/wall-clock in the module (BD-5, spec §19)
+✓ N-11: unsupported role -> refusal per BD-6 (+ T20 failure envelope -> T20_FAILED)
+✓ N-12: malformed T20 result -> MALFORMED refusal — never throws
+✓ N-13: empty proposal set -> empty records, empty refusals (honest no-op)
+✓ N-14: unknown role -> accepted as a real role (BD-2a), engine no-evidence shape verbatim
+✓ N-15: deep-frozen records AND refusals; upstream is a session-owned frozen copy — the caller object is never frozen (BD-6, no aliasing)
+✓ N-16: zero imports — static source scan of src-js/semantic-inference.js (spec §44)
+✓ N-17: determinism — two sessions over the same ingest sequence produce byte-identical registries (spec §19)
+
+Tests: 17 total, 17 passed, 0 failed

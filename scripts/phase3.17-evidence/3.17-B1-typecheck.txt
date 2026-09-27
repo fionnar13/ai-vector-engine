@@ -1,0 +1,4 @@
+
+> ai-native-vector-graphics-engine@0.1.0 typecheck
+> npx -y -p typescript tsc --noEmit
+

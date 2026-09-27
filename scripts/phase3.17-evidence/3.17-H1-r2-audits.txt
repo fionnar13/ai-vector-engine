@@ -1,0 +1,119 @@
+=== H-3: src/core integrity (r2) ===
+-- git status --porcelain -- src/core:
+-- git diff HEAD --stat -- src/core:
+src/core file count: 178
+src/core aggregate sha256: b555d9ba1de7f96893e2102f2d6ce17d762c1ff4a91e748729a39314af360957
+PIN: 178 files, 6ac8529c6f23639e998ed556d734bd54f886bf1ffd9fac5b5b99dc7099da71bc
+
+=== H-4: dependency audit (r2) ===
+-- package.json:
+{
+  "name": "ai-native-vector-graphics-engine",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "bash scripts/run-suite.sh",
+    "typecheck": "npx -y -p typescript tsc --noEmit"
+  }
+}-- npm ls --depth=0:
+ai-native-vector-graphics-engine@0.1.0 /home/z/my-project/ai-vector-engine
+└── (empty)
+
+-- grep for dependencies/devDependencies/optionalDependencies keys:
+NONE PRESENT (zero runtime npm deps)
+
+=== H-6: history linearity (r2, CORRECTED truncation needle) ===
+transaction.js sha256: 5ec1369b16c1294101e19d45bece4250be5fdcb1d1878eb07d6de87e5c0ea5e4
+transaction.js lines: 637
+PIN: 5ec1369b16c1294101e19d45bece4250be5fdcb1d1878eb07d6de87e5c0ea5e4 (638 lines)
+-- transaction.js:159-173 (HistoryManager verbatim):
+transaction.js:       > export class HistoryManager {
+transaction.js:       >   constructor(){ this.transactions=[]; this.currentIndex=-1; }
+transaction.js:       >   canUndo(){ return this.currentIndex>=0; }
+transaction.js:       >   canRedo(){ return this.currentIndex < this.transactions.length-1; }
+transaction.js:       >   push(tx){ if(tx.status!=='committed') throw new Error('Only committed transactions can be pushed'); if(this.currentIndex < this.transactions.length-1){ this.transactions=this.transactions.slice(0,this.currentIndex+1); } this.transactions.push(tx); this.currentIndex=this.transactions.length-1; }
+transaction.js:       >   current(){ if(this.currentIndex<0||this.currentIndex>=this.transactions.length) return null; return this.transactions[this.currentIndex]; }
+transaction.js:       >   getAll(){ return [...this.transactions]; }
+transaction.js:       >   getCurrentIndex(){ return this.currentIndex; }
+transaction.js:       >   getTransactionToUndo(){ if(!this.canUndo()) return null; return this.transactions[this.currentIndex]; }
+transaction.js:       >   getTransactionToRedo(){ if(!this.canRedo()) return null; return this.transactions[this.currentIndex+1]; }
+transaction.js:       >   moveBack(){ if(!this.canUndo()) throw new Error('HISTORY_EMPTY'); this.currentIndex--; }
+transaction.js:       >   moveForward(){ if(!this.canRedo()) throw new Error('HISTORY_NO_REDO'); this.currentIndex++; }
+transaction.js:       >   clear(){ this.transactions=[]; this.currentIndex=-1; }
+transaction.js:       >   size(){ return this.transactions.length; }
+transaction.js:       > }
+-- :163 verbatim:   push(tx){ if(tx.status!=='committed') throw new Error('Only committed transactions can be pushed'); if(this.currentIndex < this.transactions.length-1){ this.transactions=this.transactions.slice(0,this.currentIndex+1); } this.transactions.push(tx); this.currentIndex=this.transactions.length-1; }
+push-truncation present at :163: TRUE (needle 'this.transactions.slice(0,this.currentIndex+1)' matched on line 163) — the r1 'false' was an audit-script needle mismatch; the verbatim line above shows the truncation
+(empty git-diff line above = unchanged from the 3.16 pin)
+
+=== H-9: fresh git diff summary (r2) ===
+-- git diff HEAD --numstat:
+87	0	src-js/ai.js
+50	0	src-js/critic.js
+154	0	src-js/evaluation.js
+-- git status --short:
+ M src-js/ai.js
+ M src-js/critic.js
+ M src-js/evaluation.js
+?? scripts/phase3.17-evidence/
+?? src-js/semantic-inference.README.md
+?? src-js/semantic-inference.js
+?? tests/semantic-inference.test.mjs
+-- HEAD:
+256999637e7925c7f249bd2e8343741295ab1cf2
+-- branch:
+feat/phase-3.16-constraint-inference
+EXPECTED numstat: 87/0 ai.js, 154/0 evaluation.js, 50/0 critic.js; status: M ai.js M critic.js M evaluation.js + ?? scripts/phase3.17-evidence/ + ?? src-js/semantic-inference.README.md + ?? src-js/semantic-inference.js + ?? tests/semantic-inference.test.mjs; HEAD 256999637e7925c7f249bd2e8343741295ab1cf2
+
+=== H-10: pristine snapshot re-capture AFTER r2 GREEN (compare vs pinned 3.17-H1-snapshot.txt) ===
+FILE src-js/semantic-inference.js
+  sha256: 54a683c7407813f362d077475061fcc3f714f8cd40bd0a78dec4a5730498feee
+  lines: 311 (bytes: 14231)
+FILE src-js/semantic-inference.README.md
+  sha256: ac07ba42b04c58e962a665049ef64112c0a5bcb5172d8342ec49a1c5a34ece0f
+  lines: 215 (bytes: 12323)
+FILE tests/semantic-inference.test.mjs
+  sha256: 29e403072c95acd8074842c97aa0f463e1a2e71abfc778f9c7db0ec41696cda7
+  lines: 2404 (bytes: 162972)
+FILE src-js/ai.js
+  sha256: 2fe09acda22401c0590b12427cb61428c50d4103725ca9f9d861d2cc8fcce674
+  lines: 1636 (bytes: 83555)
+FILE src-js/evaluation.js
+  sha256: c6729c1f0f4a32e5b7e32e278fe63e744776bfcdef40c4af8e6ce7e3969c794c
+  lines: 1328 (bytes: 72504)
+FILE src-js/critic.js
+  sha256: 290c599ef2cc7570a098ff6b30e6bff8f00aa4db04959080c8b164fa72ac027d
+  lines: 559 (bytes: 30187)
+-- export counts (node --input-type=module regex count):
+src-js/semantic-inference.js: export count: 1 -> createInferenceSession
+src-js/ai.js: export count: 21 -> getPlannerRegistry, PlanningErrorCodes, PlanningError, INTENT_CATEGORIES, normalizeObjectType, validateIntent, buildExpectedState, validateExpectedState, makePlanStep, makePlan, validatePlanStep, validatePlanStructure, createPlanningContext, createExpectedState, createPlan, validatePlan, compilePlanToDSL, EXPECTED_STATE_CONSTRAINT_QUANTITIES, verifyArrangementAgainstConstraints, verifyPlanStepsAgainstConstraints, buildSemanticExpectation
+src-js/evaluation.js: export count: 12 -> EvaluationErrorCodes, EvaluationError, DEVIATION_CATEGORIES, DEVIATION_SEVERITIES, buildActualState, validateActualState, createDeviation, validateDeviation, createEvaluationResult, validateEvaluationResult, EVALUATION_TOLERANCES, evaluate
+src-js/critic.js: export count: 6 -> CriticErrorCodes, CriticError, createCorrectionProposal, validateCorrectionProposal, proposeCorrections, evaluateAndCritique
+-- frozen carriers re-hash:
+FROZEN src-js/correction.js: sha256 9e31da8dff4be9b5eedea67dd2f7e425ada7e53d9338bef6e083bdeae2a00fe2 (3335 lines)
+FROZEN src-js/constraints.js: sha256 a7907021af487d02889cd62bc64a3b2b74975e1de9f7c01324992149e31e5951 (568 lines)
+FROZEN src-js/transaction.js: sha256 5ec1369b16c1294101e19d45bece4250be5fdcb1d1878eb07d6de87e5c0ea5e4 (637 lines)
+FROZEN src-js/tools.js: sha256 0dc8124f83fa026dc26555c260c8fa047ed313660eba29ad03c0f96b2396862b (1077 lines)
+FROZEN src-js/semantic.js: sha256 e00419fab61f2fe841e4fc69fb8b9c10e1f8d434ec9535d73ceb0538e1f50596 (432 lines)
+PINS: correction 9e31da8dff4be9b5eedea67dd2f7e425ada7e53d9338bef6e083bdeae2a00fe2 (3336) | constraints a7907021af487d02889cd62bc64a3b2b74975e1de9f7c01324992149e31e5951 (569) | transaction 5ec1369b16c1294101e19d45bece4250be5fdcb1d1878eb07d6de87e5c0ea5e4 (638) | tools 0dc8124f83fa026dc26555c260c8fa047ed313660eba29ad03c0f96b2396862b (1078) | semantic e00419fab61f2fe841e4fc69fb8b9c10e1f8d434ec9535d73ceb0538e1f50596 (433)
+
+=== R2 RESOLUTION NOTES (disclosed artifacts, content PROVEN byte-identical) ===
+1. src/core aggregate: the PIN (6ac8529c6f23639e998ed556d734bd54f886bf1ffd9fac5b5b99dc7099da71bc)
+   reproduces EXACTLY under the original CONTENT-ONLY method:
+     find src/core -type f | sort | xargs cat | sha256sum
+   -> 6ac8529c6f23639e998ed556d734bd54f886bf1ffd9fac5b5b99dc7099da71bc  (MATCH)
+   The r2 script's file-hash-list variant (b555d9ba...) is a different aggregation of the
+   SAME unchanged content. git diff HEAD -- src/core/ = EMPTY and status = EMPTY prove
+   zero modification independently.
+2. Line counts: every file's wc -l is exactly one LESS than the pinned value while every
+   sha256 AND byte count match the pins exactly (e.g. semantic-inference.js 14231 bytes,
+   sha 54a683c7... in both runs). The pins used the split('\n').length convention (counts
+   the trailing empty segment); wc -l counts newline characters. Uniform -1 across all 11
+   files = counting-convention artifact, NOT a content change.
+3. push-truncation: r1's 'present: false' was an audit-script needle mismatch; the
+   corrected needle 'this.transactions.slice(0,this.currentIndex+1)' MATCHES on
+   transaction.js:163 verbatim (see H-6 above). transaction.js sha256 = the 3.16 pin.
+4. H-8 stub scan: the r2 scan runs over STRIPPED bodies (comments blanked, same scope as
+   the suite's S-D family) -> zero code-body markers. The r1 audit additionally classified
+   ai.js's four pre-existing comment-level stub-kill anchor labels (:880/:920/:1139/:1188)
+   as outside every 3.17 hunk — that comment-level classification remains the reference.
