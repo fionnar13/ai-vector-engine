@@ -1,0 +1,65 @@
+== §69 scans over src-js/semantic-correction.js (whole file, comments included — the raw-token posture) ==
+SCAN OK   (0 hits): role-write surface: setSemanticRole — src-js/semantic-correction.js
+SCAN OK   (0 hits): role-write surface: setSemantic — src-js/semantic-correction.js
+SCAN OK   (0 hits): role-write surface: forceRole — src-js/semantic-correction.js
+SCAN OK   (0 hits): role-write surface: overrideRole — src-js/semantic-correction.js
+SCAN OK   (0 hits): semantic store write: semanticStore — src-js/semantic-correction.js
+SCAN OK   (0 hits): network: fetch/axios/http/https — src-js/semantic-correction.js
+SCAN OK   (0 hits): filesystem: fs./writeFile — src-js/semantic-correction.js
+SCAN OK   (0 hits): LLM: LLM/OpenAI/Anthropic — src-js/semantic-correction.js
+SCAN OK   (0 hits): npm imports: require( — src-js/semantic-correction.js
+SCAN OK   (0 hits): npm imports: import declaration — src-js/semantic-correction.js
+SCAN OK   (0 hits): npm imports: dynamic import() — src-js/semantic-correction.js
+SCAN OK   (0 hits): engine import: from './correction' — src-js/semantic-correction.js
+SCAN OK   (0 hits): engine call: rollbackCorrectionAttempt( — src-js/semantic-correction.js
+== §69 scans over src-js/semantic-correction.js (STRIPPED code body — the A-14 posture) ==
+SCAN OK   (0 hits): banned: \bfs\b (stripped body)
+SCAN OK   (0 hits): banned: \bfetch\b (stripped body)
+SCAN OK   (0 hits): banned: \beval\b (stripped body)
+SCAN OK   (0 hits): banned: \bFunction\b (stripped body)
+SCAN OK   (0 hits): banned: \bprocess\b (stripped body)
+SCAN OK   (0 hits): banned: \bglobalThis\b (stripped body)
+SCAN OK   (0 hits): banned: Date.now (stripped body)
+SCAN OK   (0 hits): banned: Math.random (stripped body)
+== Checkpoint G-specific scans (spec §50/§51) ==
+SCAN OK   (0 hits): loop-state vocabulary (raw): PLANNING — src-js/semantic-correction.js
+SCAN OK   (0 hits): loop-state vocabulary (raw): EXECUTING — src-js/semantic-correction.js
+SCAN OK   (0 hits): loop-state vocabulary (raw): EVALUATING — src-js/semantic-correction.js
+SCAN OK   (0 hits): loop-state vocabulary (raw): DIAGNOSING — src-js/semantic-correction.js
+SCAN OK   (0 hits): loop-state vocabulary (raw): CORRECTING — src-js/semantic-correction.js
+SCAN OK   (0 hits): loop-state vocabulary (raw): RE_EXECUTING — src-js/semantic-correction.js
+SCAN OK   (0 hits): loop-state vocabulary (raw): RE_EVALUATING — src-js/semantic-correction.js
+SCAN OK   (0 hits): loop-state vocabulary (raw): ROLLING_BACK — src-js/semantic-correction.js
+SCAN OK   (0 hits): loop-state vocabulary (raw): IDLE — src-js/semantic-correction.js
+SCAN OK   (0 hits): loop-state vocabulary (stripped): PLANNING (stripped body)
+SCAN OK   (0 hits): loop-state vocabulary (stripped): EXECUTING (stripped body)
+SCAN OK   (0 hits): loop-state vocabulary (stripped): EVALUATING (stripped body)
+SCAN OK   (0 hits): loop-state vocabulary (stripped): DIAGNOSING (stripped body)
+SCAN OK   (0 hits): loop-state vocabulary (stripped): CORRECTING (stripped body)
+SCAN OK   (0 hits): loop-state vocabulary (stripped): RE_EXECUTING (stripped body)
+SCAN OK   (0 hits): loop-state vocabulary (stripped): RE_EVALUATING (stripped body)
+SCAN OK   (0 hits): loop-state vocabulary (stripped): ROLLING_BACK (stripped body)
+SCAN OK   (0 hits): loop-state vocabulary (stripped): IDLE (stripped body)
+SCAN OK   (0 hits): banned: Math.random (stripped body)
+SCAN OK   (0 hits): banned: Date.now (stripped body)
+(G region starts at line 1476)
+SCAN OK   (0 hits): G region: no role-write tokens (G region, stripped)
+SCAN OK   (0 hits): G region: no store-write calls (G region, stripped)
+SCAN OK   (0 hits): G region: no RNG / wall clock (G region, stripped)
+SCAN OK   (present): rollback goes through the substrate's OWN undo (transactionManager.undo())
+SCAN OK   (present): the top-of-history guard reads through the transactionManager (disclosure 32)
+== export surface ==
+394:export class SemanticCorrectionError extends Error {
+412:export const SEMANTIC_CORRECTION_CAPABILITIES = deepFreeze([
+507:export function diagnoseSemanticDeviation(deviation, objectFacts){
+766:export function buildSemanticCorrectionProposal(target, capability, objectFacts){
+963:export function executeSemanticCorrectionAttempt(proposal, substrate){
+1332:export function verifySemanticCorrectionAttempt(attempt, proposal, target, substrate){
+1389:export function createSemanticRoleProvider(substrate){
+1590:export function detectSemanticRegression(preVerification, postVerification){
+1630:export function rollbackSemanticCorrectionAttempt(attempt, substrate){
+1678:export function detectSemanticConvergence(verificationTrail, policy){
+1744:export function buildSemanticCorrectionAgenda(deviation, objectFacts){
+== line count ==
+1791 src-js/semantic-correction.js
+ALL §69 + G SCANS ZERO-HIT

@@ -1,0 +1,1503 @@
+﻿TAP version 13
+# === PHASE 3.13 Checkpoint A: PlanningErrorCodes (spec ┬º14) ===
+# Γ£ô all 11 mandated planning error codes exist
+# Γ£ô PlanningError carries code + message and is an Error
+# === Checkpoint A: validateIntent ΓÇö create (spec ┬º05/┬º07) ===
+# Γ£ô spec ┬º07 create-rectangle example is valid
+# Γ£ô missing type -> INVALID_INTENT; unknown type -> UNSUPPORTED_OPERATION
+# Γ£ô null / non-object intent -> INVALID_INTENT
+# Γ£ô missing objectType -> MISSING_PARAMETER
+# Γ£ô unknown objectType -> UNSUPPORTED_OBJECT_TYPE
+# Γ£ô missing width/height -> MISSING_PARAMETER
+# Γ£ô non-finite numeric values -> INVALID_PARAMETER (spec ┬º07)
+# Γ£ô invalid dimensions (<=0) -> INVALID_PARAMETER
+# Γ£ô invalid color -> INVALID_PARAMETER
+# Γ£ô invalid opacity / placement -> INVALID_PARAMETER
+# Γ£ô create ellipse requires rx/ry; unknown keys rejected
+# === Checkpoint A: validateIntent ΓÇö transform/appearance/alignment/structure (┬º07) ===
+# Γ£ô transform intent: valid translate; unknown operation -> UNSUPPORTED_OPERATION
+# Γ£ô appearance intent: fill and/or opacity; neither -> MISSING_PARAMETER
+# Γ£ô alignment intent: mode must be valid for axis (T08 rules, tools.js:399-402)
+# Γ£ô structure intent: group/ungroup only
+# === Checkpoint A: ExpectedState (spec ┬º08/┬º09) ===
+# Γ£ô buildExpectedState: mechanical derivation for create rect (requested, not measured)
+# Γ£ô buildExpectedState: rx/ry default to 0 (symmetric true) when omitted
+# Γ£ô buildExpectedState: appearance / alignment / structure intents map their sections
+# Γ£ô validateExpectedState rejects missing sections / bad status / function values
+# === Checkpoint A: Plan / PlanStep (spec ┬º10/┬º16) ===
+# Γ£ô makePlanStep + validatePlanStep
+# Γ£ô makePlan: ┬º10 shape {id, intentId, steps, expectedState, deterministic, parentPlanId}
+# Γ£ô ┬º16 determinism: identical intent + steps -> identical plan id + intentId
+# Γ£ô validatePlanStructure rejections: empty steps, deterministic=false, bad step, bad state
+# === Checkpoint A: PlanningContext (spec ┬º13) ===
+# Γ£ô createPlanningContext: deep-frozen plain-data projection
+# Γ£ô createPlanningContext rejects function values (no mutation methods can be exposed, ┬º13)
+# Γ£ô createPlanningContext rejects non-object input
+# === Checkpoint A: static determinism + security scan of src-js/ai.js (┬º05/┬º16/┬º26 precedent) ===
+# Γ£ô planner source is free of nondeterminism and forbidden capabilities
+# === Checkpoint B: fixtures (spec ┬º20 vertical-slice intent) ===
+# === Checkpoint B: createExpectedState (spec ┬º08/┬º15) ===
+# Γ£ô B: createExpectedState returns a deep-frozen, valid ExpectedState equal to buildExpectedState
+# Γ£ô B: createExpectedState throws PlanningError for an invalid intent (top-level INVALID_INTENT, specific code in details ΓÇö buildExpectedState contract, ai.js:341)
+# Γ£ô B: createExpectedState rejects a mutable (non-frozen) context and a non-object context (┬º13)
+# Γ£ô B: createExpectedState works without a context (context optional at Checkpoint B)
+# === Checkpoint B: createPlan ΓÇö Rules A/B/C/D on create intents (┬º12/┬º17/┬º20) ===
+# Γ£ô B: ┬º20 slice plan = T01 geometry-only -> T07 fill -> T08 both/center (12/┬º20)
+# Γ£ô B: Rule C ΓÇö T01 receives NO fill key; rx AND ry both present (deviation 5)
+# Γ£ô B: Rule B ΓÇö center math per tool anchor: rect x/y top-left, ellipse cx/cy center
+# Γ£ô B: placement origin/absent ΓÇö explicit x/y passthrough (tool anchor semantics), default 0,0
+# Γ£ô B: create + fill + opacity -> opacity rides the T07 step (tools.js:372)
+# Γ£ô B: opacity-only create (no fill) -> NO_VALID_PLAN (T07 opacity-only needs an existing fill item, tools.js:377)
+# Γ£ô B: placement center + explicit x/y -> INVALID_PARAMETER (conflict; Planner computes placement)
+# Γ£ô B: placement center without artboard in context -> MISSING_PARAMETER
+# Γ£ô B: artboard with non-finite centerX/centerY -> INVALID_PARAMETER
+# Γ£ô C: B-era boundary SUPERSEDED ΓÇö non-create intents now plan via Rules E/F/G/H (spec ┬º41-C)
+# Γ£ô B: invalid intent -> INVALID_INTENT; mutable context -> INVALID_PARAMETER; plan frozen + valid
+# Γ£ô B: non-finite x/y on a create intent (validator hole for absent placement) caught at plan time
+# === Checkpoint B: validatePlan (spec ┬º18) ===
+# Γ£ô B: valid slice plan passes with a frozen context; verdict object shape
+# Γ£ô B: PLANNER RULE ΓÇö centered ExpectedState without a T08 step -> PLAN_INVALID (spec ┬º20 mandate)
+# Γ£ô B: PLANNER RULE ΓÇö T08 present but axis/mode not both/center -> PLAN_INVALID
+# Γ£ô B: dependency references ΓÇö unknown $ref and forward $ref -> PLAN_INVALID
+# Γ£ô B: dependency convention ΓÇö objectIds entries must use the $stepId form
+# Γ£ô B: duplicate step ids -> PLAN_INVALID
+# Γ£ô B: structural garbage + context contract (non-frozen context throws PlanningError)
+# === Checkpoint B: compilePlanToDSL (spec ┬º23/┬º24) ===
+# Γ£ô B: slice plan -> DSL [create, appearance, align]; no fill inside the create args (Rule C)
+# Γ£ô B: ┬º24 round trip ΓÇö Plan -> compilePlanToDSL -> parseDSL -> validateDSL -> compileToIR (same ops + deps)
+# Γ£ô B: ellipse plan compiles to create/ellipse with cx/cy/rx/ry
+# Γ£ô B: compilePlanToDSL guards ΓÇö unknown toolId, non-solid fill, empty T07, missing objectIds, invalid plan
+# === Checkpoint B: ┬º16 determinism proof (mandatory) ===
+# Γ£ô B: same intent + same context, two runs -> ExpectedState JSON.stringify byte-identical
+# Γ£ô B: same intent + same context, two runs -> Plan JSON.stringify byte-identical (no Date.now/Math.random/randomUUID)
+# Γ£ô B: same intent + same context, two runs -> compiled DSL JSON.stringify byte-identical
+# Γ£ô B: key-order-permuted intent -> identical intentId/plan id (content-derived identity)
+# === Checkpoint C: fixtures (┬º13 snapshot with known object ids ΓÇö declared with the B fixtures above) ===
+# === Checkpoint C: Rule E ΓÇö Transform (┬º17-E) ===
+# Γ£ô C-E: translate -> single T05 move_object step with $doc: refs + finite delta (tools.js:308-325)
+# Γ£ô C-E: multi-target translate -> ONE T05 step carrying all targets (T05 objectIds is array-capable, tools.js:309)
+# Γ£ô C-E: scale -> T06 with the diagonal matrix resolved at plan time (mirrors dsl.js:420-424)
+# Γ£ô C-E: rotate -> T06 with the origin-rotation matrix, EXACTLY the substrate expressions (dsl.js:425-428)
+# Γ£ô C-E: matrix -> T06 passthrough of the validated affine matrix
+# Γ£ô C-E: unknown target -> INVALID_PARAMETER naming the target (Planner never guesses identities)
+# Γ£ô C-E: missing context / context.objects missing or not a plain map -> MISSING_PARAMETER
+# Γ£ô C-E: duplicate targets -> INVALID_PARAMETER (a duplicated target would double-apply the operation)
+# Γ£ô C-E: transform ExpectedState keeps geometry null (execution-dependent); plan validates against the snapshot
+# Γ£ô C-E: compilePlanToDSL -> the EXISTING transform op syntax for all four operations (┬º23: no second DSL)
+# Γ£ô C-E: IR round trip ΓÇö parse + compileToIR yield T05/T06 with plan-matching inputs and targets
+# Γ£ô C-E: substrate boundary PINNED ΓÇö validateDSL flags doc-object targets as UNKNOWN_REFERENCE (analyzeReferences dsl.js:225-268 only knows program-internal refs; resolution is Checkpoint E agenda)
+# Γ£ô C-E: determinism ΓÇö same intent + same context, two runs -> ExpectedState/Plan/DSL byte-identical (┬º16)
+# === Checkpoint C: Rule F ΓÇö Appearance (┬º17-F) ===
+# Γ£ô C-F: fill-only appearance -> single T07 step with the real T07 contract {kind:solid,color}
+# Γ£ô C-F: fill + opacity -> both ride the T07 step (tools.js:370-374)
+# Γ£ô C-F: opacity-only on an EXISTING object is plannable (unlike create: T07 fill-item precondition tools.js:377 is tool-level and CAN succeed here)
+# Γ£ô C-F: multi-target appearance -> ONE T07 step PER target (DSL appearance op is single-target, dsl.js:114) ΓÇö lossless mapping
+# Γ£ô C-F: unknown target -> INVALID_PARAMETER
+# Γ£ô C-F: compilePlanToDSL -> per-target appearance instructions (┬º23 syntax)
+# Γ£ô C-F: IR round trip ΓÇö T07 chain with canonical RGB fill (deviation 4)
+# Γ£ô C-F: determinism ΓÇö two runs byte-identical (┬º16)
+# === Checkpoint C: Rule G ΓÇö Alignment (┬º17-G) ===
+# Γ£ô C-G: alignment -> ONE T08 step, axis/mode passthrough (T08 + DSL align are array-capable, dsl.js:139-142)
+# Γ£ô C-G: single-target align allowed (documented no-op success precedent, tools.js:393-395)
+# Γ£ô C-G: invalid axis/mode combination rejected at intent level (top-level INVALID_INTENT, Checkpoint A contract)
+# Γ£ô C-G: compilePlanToDSL -> align instruction + IR round trip T08
+# Γ£ô C-G: determinism ΓÇö two runs byte-identical (┬º16)
+# === Checkpoint C: Rule H ΓÇö Structure (┬º17-H) ===
+# Γ£ô C-H: group 2 targets -> ONE T10 step (T10 objectIds>=2, tools.js:490)
+# Γ£ô C-H: group 3 targets -> one step, three $doc refs
+# Γ£ô C-H: group with 1 target -> NO_VALID_PLAN (approved decision (a): a plan that cannot succeed must not be produced; T10 needs >=2)
+# Γ£ô C-H: ungroup 1 target -> ONE T11 step (T11 inputs are group node ids, tools.js:517-525)
+# Γ£ô C-H: ungroup 2 targets -> TWO T11 steps (DSL ungroup is single-target, dsl.js:121) ΓÇö lossless
+# Γ£ô C-H: unknown target / duplicate targets -> INVALID_PARAMETER
+# Γ£ô C-H: compilePlanToDSL -> group/ungroup instructions + IR round trip T10/T11
+# Γ£ô C-H: determinism ΓÇö two runs byte-identical (┬º16)
+# === Checkpoint C: $doc: reference convention in validatePlan (┬º18 extension) ===
+# Γ£ô C-X: $doc: ref to an object missing from the snapshot -> PLAN_INVALID naming the ref
+# Γ£ô C-X: $doc: refs WITHOUT a context cannot resolve -> PLAN_INVALID (strict, never silently skipped)
+# Γ£ô C-X: resolvable $doc: refs validate clean; $step refs unaffected (both kinds coexist)
+# === Checkpoint D: fixtures (spec ┬º41-D) ===
+# Γ£ô D-1: every toolId of every planner-generated plan resolves in the live Tool Registry (resolution mandate)
+# Γ£ô D-2: unknown toolId -> TOOL_NOT_FOUND in the validatePlan verdict
+# Γ£ô D-3: category validation ΓÇö read (T16) / proposal (T19) tools are NOT plannable (Planner rule, revisitable)
+# Γ£ô D-4: input validation against the tool DECLARED inputSchema (missing key / wrong type / non-finite / object type)
+# Γ£ô D-5: undeclared-but-accepted inputs stay valid (live schemas under-declare executor params; tools.js:232/240)
+# Γ£ô D-6: mutation tools are planned but NEVER executed during planning (spec ┬º41-D boundary)
+# Γ£ô D-7: registry is read-only from the Planner perspective (frozen projection + frozen defs + unchanged metadata)
+# Γ£ô D-8: registry injection is pure DI ΓÇö identical output, determinism preserved (┬º16)
+# Γ£ô D-9: registry-contract diagnostics ΓÇö unknown category / missing inputSchema / malformed facade fail loudly
+# === Checkpoint E: substrate extension ΓÇö analyzeReferences(program, context?) ===
+# Γ£ô E-1: $doc:<id> literal targets resolve through context.objects (own-key check)
+# Γ£ô E-2: raw-id targets (the Planner-stripped form, ai.js:1237) resolve through context.objects
+# Γ£ô E-3: context ABSENT -> $doc: and raw ids stay DSL_UNKNOWN_REFERENCE (pre-E behavior pinned)
+# Γ£ô E-4: with a context present, targets NOT in context.objects stay unknown (fail-loud; the substrate never guesses ΓÇö ┬º24 analog)
+# Γ£ô E-5: prototype-safe reads ΓÇö $doc:toString / $doc:constructor / __proto__ never resolve (own-property only, mirrors ai.js:744)
+# Γ£ô E-6: malformed context keeps the gate CLOSED (objects array / missing objects / non-object context) ΓÇö fail-loud via the unknown-ref error, never silently accepted
+# Γ£ô E-7: validateDSL threads the context ΓÇö doc-referencing program invalid without, valid with; other semantic checks stay enforced
+# Γ£ô E-8: compileDSL threads the context ΓÇö doc-referencing program compiles with context, fails without
+# Γ£ô E-9: compileToIR(program, context) is threading-neutral ΓÇö identical IR with and without a context (mapping is resolution-free; targets carried verbatim)
+# Γ£ô E-10: program-internal programs validate identically with and without a context (substrate extension is verdict-neutral for ┬º23-style programs)
+# === Checkpoint E: full round trip ΓÇö Plan -> compilePlanToDSL -> parseDSL -> validateDSL(context) -> compileToIR ===
+# Γ£ô E-RT Rule E: translate T05 + scale T06 ΓÇö $doc: targets survive validateDSL with context; same toolIds/inputs/targets
+# Γ£ô E-RT Rule F: appearance T07 chain ΓÇö $doc: targets round trip with context (multi-target, fill + opacity)
+# Γ£ô E-RT Rule G: align T08 ΓÇö $doc: targets round trip with context
+# Γ£ô E-RT Rule H: group T10 + ungroup T11 ΓÇö $doc: targets round trip with context
+# Γ£ô E-RT Rules A-D: create plans round trip WITH a context passed (self-contained programs; threading must not disturb the T01/T02 -> T07 -> T08 chains)
+# === Checkpoint F: mandatory vertical slice (spec ┬º41-F) ===
+# === PHASE 3.13 Checkpoint G: Architecture Tests (spec ┬º26/┬º41-G) ===
+# Γ£ô G-1: import contract ΓÇö the Planner imports exactly ONE substrate module (./tools.js); every specifier relative; no fs, no node: builtin, no bare npm specifier
+# Γ£ô G-2: Planner code reaches no browser/DOM global and no network ΓÇö window, document, fetch (┬º41-G), scanned on the comment/string-stripped code body
+# Γ£ô G-3: Planner code reaches no dynamic code execution and no Node escape hatch ΓÇö eval, Function, require(, import(, globalThis, process, fs
+# Γ£ô G-4: Planner code calls no substrate mutation method ΓÇö Store.write, Transaction.execute/commit/rollback, registry register/unregister, Renderer render/invalidate, SpatialIndex insert/remove/update/delete are structurally unreachable (┬º26: the only mutation path is Plan -> DSL -> Tool Registry -> Transaction -> Commit, executed by the substrate, never by the Planner)
+# Γ£ô G-5: zero npm dependencies added ΓÇö package.json declares no dependency fields and every src-js runtime module imports only relative specifiers
+# Γ£ô G-6: scan-harness sanity (anti-vacuity) ΓÇö the stripper demonstrably removes comments/strings and preserves code 1:1, so G-2/G-3/G-4 cannot pass vacuously
+# Γ£ô F-S1: BEFORE PLANNING ΓÇö canonical stores + history.size() + SpatialIndex + RenderTree captured as deterministic JSON (fresh document)
+# Γ£ô F-S2: AFTER PLANNING / BEFORE EXECUTION ΓÇö the planning chain ran, NO transaction executed: stores byte-identical, history unchanged, SpatialIndex NOT invalidated, RenderTree NOT invalidated (the Planner is read-only)
+# Γ£ô F-S3: DURING EXECUTION ΓÇö Plan->DSL->Tool Registry->tool validation->Transaction->Commit through the REAL substrate: history grows by exactly the executed step count, TransactionCommitted emitted per commit
+# Γ£ô F-S4: AFTER COMMIT ΓÇö object/geometry/appearance final state, WorldBBox center === artboard center (1e-9), SpatialIndex + RenderTree invalidated
+# Tests: 131 total, 131 passed, 0 failed
+# Subtest: tests\\ai.test.mjs
+ok 1 - tests\\ai.test.mjs
+  ---
+  duration_ms: 672.5094
+  type: 'test'
+  ...
+# === Effect Graph ===
+# Γ£ô Valid effect input
+# Γ£ô Forward reference rejection
+# Γ£ô Self-reference rejection
+# Γ£ô Direct cycle detection
+# Γ£ô Indirect cycle detection via forward ref
+# Γ£ô Missing input rejection
+# Γ£ô Duplicate input rejection
+# === Stack Operations ===
+# Γ£ô Insert
+# Γ£ô Remove
+# Γ£ô Move
+# Γ£ô Update
+# Γ£ô Enable
+# Γ£ô Disable
+# Γ£ô Get item
+# === Dependency ===
+# Γ£ô Delete input used by Effect
+# Γ£ô Effect becomes disabled
+# Γ£ô Warning generated
+# Γ£ô No dangling reference for enabled effects
+# === Resolution ===
+# Γ£ô Resolve fill
+# Γ£ô Resolve stroke
+# Γ£ô Resolve disabled item
+# Γ£ô Resolve effect graph deterministically
+# Tests: 22 total, 22 passed, 0 failed
+# Subtest: tests\\appearance-graph.test.mjs
+ok 2 - tests\\appearance-graph.test.mjs
+  ---
+  duration_ms: 252.5467
+  type: 'test'
+  ...
+# === Appearance ===
+# Γ£ô Create empty Appearance
+# Γ£ô Create Appearance with Fill
+# Γ£ô Create Appearance with Stroke
+# Γ£ô Create Appearance with Fill + Stroke
+# Γ£ô Stable AppearanceID
+# Γ£ô Item ID uniqueness
+# Γ£ô Stack ordering
+# === Fill ===
+# Γ£ô Valid RGB
+# Γ£ô Valid alpha
+# Γ£ô Invalid RGB
+# Γ£ô Invalid alpha
+# Γ£ô NaN rejection
+# Γ£ô Infinity rejection
+# === Stroke ===
+# Γ£ô Width validation
+# Γ£ô Cap validation
+# Γ£ô Join validation
+# Γ£ô Miter validation
+# Γ£ô Center alignment
+# Γ£ô Invalid width
+# Γ£ô Invalid miter
+# === Opacity ===
+# Γ£ô Opacity 0
+# Γ£ô Opacity 0.5
+# Γ£ô Opacity 1
+# Γ£ô Reject opacity <0
+# Γ£ô Reject opacity >1
+# Γ£ô Reject opacity NaN
+# === Serialization ===
+# Γ£ô Serialize
+# Γ£ô Deserialize
+# Γ£ô Round-trip equality
+# Γ£ô Stack ordering preserved
+# Γ£ô IDs preserved
+# === Immutability ===
+# Γ£ô get() cannot mutate canonical state
+# Γ£ô validation does not mutate
+# Γ£ô resolution does not mutate
+# === Visual BBox ===
+# Γ£ô StrokeBBox expansion
+# Γ£ô Zero-width stroke BBox = WorldBBox
+# Tests: 36 total, 36 passed, 0 failed
+# Subtest: tests\\appearance.test.mjs
+ok 3 - tests\\appearance.test.mjs
+  ---
+  duration_ms: 306.158
+  type: 'test'
+  ...
+# Architecture Checks - Geometry Kernel:
+# Γ£ô src/core/geometry/types.ts - no forbidden imports
+# Γ£ô src/core/geometry/rect.ts - no forbidden imports
+# Γ£ô src/core/geometry/ellipse.ts - no forbidden imports
+# Γ£ô src/core/geometry/polygon.ts - no forbidden imports
+# Γ£ô src/core/geometry/star.ts - no forbidden imports
+# Γ£ô src/core/geometry/line.ts - no forbidden imports
+# Γ£ô src/core/geometry/bezier.ts - no forbidden imports
+# Γ£ô src/core/geometry/contour.ts - no forbidden imports
+# Γ£ô src/core/geometry/path.ts - no forbidden imports
+# Γ£ô src/core/geometry/bbox.ts - no forbidden imports
+# Γ£ô src/core/geometry/flatten.ts - no forbidden imports
+# Γ£ô src/core/geometry/validation.ts - no forbidden imports
+# Γ£ô src/core/geometry/conversion.ts - no forbidden imports
+# Γ£ô src/core/geometry/detection.ts - no forbidden imports
+# Γ£ô src/core/geometry/transform.ts - no forbidden imports
+# Γ£ô Geometry has no UI/Renderer/SceneGraph/AI/FS dependencies
+# Γ£ô No circular dependency (Math -> Geometry only)
+# Architecture tests PASS
+# Subtest: tests\\architecture.test.mjs
+ok 4 - tests\\architecture.test.mjs
+  ---
+  duration_ms: 334.042
+  type: 'test'
+  ...
+# === PHASE 3.16 Category A: Data Contracts (9 tests) ===
+# Γ£ô A-1: T19_SUPPORTED_TYPES is exactly the A-2/D-8 intersection {equalWidth, equalHeight, align, center} ΓÇö frozen
+# Γ£ô A-2: T19_HOUSE_MAPPING ΓÇö frozen, complete: every T19 type maps >=1 house type; align covers the four edges; center covers both center axes
+# Γ£ô A-3: validateInferenceRequest accepts the golden request shape {utterance, objects[>=2], strength?} and returns {valid:true, errors:[]}
+# Γ£ô A-4: validateInferenceRequest deterministic refusals ΓÇö non-object, missing/non-string utterance, <2 objects, non-string ids, function values, invalid strength
+# Γ£ô A-5: inferConstraints output shape ΓÇö exact proposal key set, frozen plain data, unmatched honesty list
+# Γ£ô A-6: proposal ids are content-derived UUID-v4-FORMAT strings and are accepted by the LIVE ConstraintStore (create -> list round-trip)
+# Γ£ô A-7: toHouseConstraintRecord ΓÇö exact house shape, house type within the live constraints.js vocabulary, enabled:true, source ai
+# Γ£ô A-8: validateHouseConstraintRecord refusals ΓÇö missing keys, unknown type, bad strength, bad id format, non-array objectIds
+# Γ£ô A-9: every 3.16 inference-surface output is deep-frozen (proposals, house records, validator verdicts are plain data)
+# === PHASE 3.16 Category B: T19 Vocabulary Mapping (8 tests) ===
+# Γ£ô B-1: equal width is inferred as T19 equalWidth mapped to the house equalWidth type over ALL participants (reference = first)
+# Γ£ô B-2: equal height is inferred as T19 equalHeight mapped to the house equalHeight type
+# Γ£ô B-3: the align family ΓÇö left/right/top/bottom phrasings map to alignLeft/alignRight/alignTop/alignBottom with the fixed edge semantics
+# Γ£ô B-4: center phrasings ΓÇö horizontally maps to alignCenterX, vertically to alignCenterY (single-axis centering)
+# Γ£ô B-5: unqualified centered maps to BOTH center axes ΓÇö two proposals, deterministic order (alignCenterX then alignCenterY)
+# Γ£ô B-6: unsupported vocabulary is honestly unmapped ΓÇö zero proposals invented, the span reported in unmatched
+# Γ£ô B-7: multi-phrase utterances produce the deterministic full set in fixed table order (equal width + align left)
+# Γ£ô B-8: the mapping closes onto the LIVE house vocabulary ΓÇö every inferred houseType is in constraints.js VALID_TYPES, and paraphrases of the same logical constraint yield the SAME content-derived id
+# === PHASE 3.16 Category C: T19 Pass-Through (4 tests) ===
+# Γ£ô C-1: an already-canonical house record validates unchanged ΓÇö validateHouseConstraintRecord is a pure shape verdict (no transformation, no re-id)
+# Γ£ô C-2: canonical records of ALL eleven house types pass validation ΓÇö the pass-through surface covers the full live vocabulary, not just the T19 subset
+# Γ£ô C-3: the acceptance chain preserves identity ΓÇö the house record id EQUALS the proposal id (no re-id through toHouseConstraintRecord)
+# Γ£ô C-4: canonical records round-trip the LIVE ConstraintStore byte-identically ΓÇö the store is the acceptance authority and the 3.16 records are first-class citizens
+# === PHASE 3.16 Category D: Provenance & Confidence (3 tests) ===
+# Γ£ô D-1: every proposal carries deterministic provenance {phrase, rule} with rule = T19:<t19Type> and the phrase traceable in the utterance
+# Γ£ô D-2: confidence is rule-derived, in (0,1], constant 1 for exact phrase matches, and deterministic across runs
+# Γ£ô D-3: the provenance survives acceptance ΓÇö the house record embeds {t19Type, inferredBy:'T19'} so the audit trail reaches the loop seams
+# === PHASE 3.16 Category E: No Mutation (5 tests) ===
+# Γ£ô E-1: inferConstraints does not mutate the request record
+# Γ£ô E-2: inferConstraints does not mutate the objects array or its entries (including entry order and nested values)
+# Γ£ô E-3: toHouseConstraintRecord does not mutate the proposal (the acceptance path is read-only over its source)
+# Γ£ô E-4: the validators never mutate their inputs (request, proposal, house record)
+# Γ£ô E-5: acceptance is alias-free ΓÇö the LIVE ConstraintStore record, the frozen house record, and every store read are independent deep structures (no aliasing in any direction)
+# === PHASE 3.16 Category F: Determinism (3 tests) ===
+# Γ£ô F-1: inferConstraints ΓÇö identical requests yield byte-identical outputs (ids, provenance, order), Invariant 17 face
+# Γ£ô F-2: toHouseConstraintRecord + the validators are byte-identical across runs
+# Γ£ô F-3: content identity is key-order-insensitive ΓÇö permuting the KEY ORDER inside object entries and the request yields identical inference output (stable canonicalization)
+# === PHASE 3.16 Category G: Architecture Scans ΓÇö constraint-inference.js (4 tests) ===
+# Γ£ô G-1: constraint-inference.js ZERO-import pin ΓÇö no import declarations at all, no dynamic module escape (require( / import() in the code body)
+# Γ£ô G-2: constraint-inference.js code body reaches no capability surface ΓÇö window/document/fetch/eval/Function/globalThis/process/fs/localStorage/require/Date.now/Math.random absent (alias-form word-boundary scan on the stripped body)
+# Γ£ô G-3: constraint-inference.js calls no mutation method ΓÇö the full substrate mutation vocabulary is absent from the stripped body (the module is pure data, reads nothing, writes nothing)
+# Γ£ô G-4: scan-harness sanity (anti-vacuity) ΓÇö the stripper preserves the module's code tokens AND removes the documented comment occurrences with 1:1 char/line mapping
+# === PHASE 3.16 Category H: Backward Compatibility (3 tests) ===
+# Γ£ô H-1: evaluation.js evaluate() contract is UNCHANGED ΓÇö a 3.14-style geometry expectation yields the exact ┬º12 record shape with metadata keys exactly {tolerances, unevaluatedExpectations} (the 3.16 arm added a SEPARATE export, never touched the engine)
+# Γ£ô H-2: critic.js proposeCorrections contract is UNCHANGED ΓÇö the regular rule engine still produces the 3.14 create-rebuild proposal for a geometry deviation and does NOT consume the 3.16 constraint deviations (the constraint pass is a separate, additive surface)
+# Γ£ô H-3: ai.js planning contracts are UNCHANGED ΓÇö the documented 3.13 rules still hold (slice plan T01->T07, transform scale resolves the T06 diagonal, create-planning context stays deep-frozen plain data)
+# === PHASE 3.16 Category I: Planner Integration (8 tests) ===
+# Γ£ô I-1: verifyArrangementAgainstConstraints ΓÇö the golden column satisfies all three T19-inferred constraints: PRESERVED with per-constraint SATISFIED checks
+# Γ£ô I-2: a violating arrangement is caught BEFORE planning executes ΓÇö VIOLATED names the constraint and the violated participant (the planning-time face of P-5)
+# Γ£ô I-3: missing participant state or unmeasurable quantities are UNVERIFIABLE ΓÇö the planner never invents a verdict (honesty face)
+# Γ£ô I-4: disabled constraints are invisible to the planning-time verification
+# Γ£ô I-5: the planning verdicts are deterministic, deep-frozen, and computed without mutating their inputs
+# Γ£ô I-6: verifyPlanStepsAgainstConstraints ΓÇö a T05 step whose delta mutates a pinned axis of a touching HARD constraint CONFLICTS at planning time (the static mutation face, mirroring the correction gate semantics)
+# Γ£ô I-7: verifyPlanStepsAgainstConstraints ΓÇö a T07 appearance step mutates no geometric axis (PRESERVED under any constraint); a T05 delta on a NON-pinned axis is PRESERVED; an unclassifiable tool is conservatively flagged
+# Γ£ô I-8: integration ΓÇö the planner's OWN creation ExpectedStates, projected into the arrangement shape, satisfy the T19-inferred regime (the arrangement IS the constraints' origin: the loop of I returns PRESERVED on its own output)
+# === PHASE 3.16 Category J: Evaluation Integration (14 tests) ===
+# Γ£ô J-1: the satisfied golden column evaluates PASS ΓÇö zero deviations, all constraintResults SATISFIED, empty constraintDeviations, evaluated carries the constraint marker
+# Γ£ô J-2: the alignLeft drift produces EXACTLY ONE ┬º13 deviation ΓÇö category geometry, property position.x, expected 100, actual 130, delta 30, tolerance 1e-9, objectId = the drifted participant, targetRef $doc: ΓÇö with a deterministic message and full provenance
+# Γ£ô J-3: equalWidth violations report the size class ΓÇö property size.width with the reference width as expected
+# Γ£ô J-4: equalHeight violations report size.height with the same contract
+# Γ£ô J-5: center constraints report the pinned center axis ΓÇö alignCenterX deviations carry position.x with centerX quantities; alignCenterY carries position.y
+# Γ£ô J-6: localization is deterministic ΓÇö when MULTIPLE participants fail, the deviation names the FIRST failing participant in objectIds order (the house constraint-kernel break semantics)
+# Γ£ô J-7: fixedDistance violations report the distance class with the configured distance as expected
+# Γ£ô J-8: a missing participant is UNVERIFIABLE ΓÇö no deviation is invented for an unobservable constraint (┬º21 honesty)
+# Γ£ô J-9: an unmeasurable geometry (worldBBox null) is UNVERIFIABLE ΓÇö an unmeasurable constraint is never invented (┬º15/┬º19 honesty)
+# Γ£ô J-10: disabled constraints are DISABLED and invisible ΓÇö no deviation, no influence on other results
+# Γ£ô J-11: the tolerance boundary ΓÇö an error exactly at the tolerance is SATISFIED, beyond it a deviation (the ┬º14/┬º15 kernel discipline)
+# Γ£ô J-12: the compliance arm is read-only ΓÇö the stores are byte-identical after the evaluation and the ┬º12 record is deep-frozen
+# Γ£ô J-13: the ┬º12 record is the NATIVE merge ΓÇö status derives from the deviations exactly (PASS iff zero), the record validates through the LIVE validator, and the provenance rides in metadata
+# Γ£ô J-14: the compliance arm is deterministic ΓÇö identical inputs yield byte-identical ┬º12 records (Invariant 17 face), including ids and messages
+# === PHASE 3.16 Category K: Critic Integration (14 tests) ===
+# Γ£ô K-1: proposeCorrections on a satisfied (PASS) constraint evaluation yields an empty frozen proposal array
+# Γ£ô K-2: the alignLeft violation yields EXACTLY ONE 7-key ┬º25 proposal ΓÇö intent transform/translate with delta = expected - actual on the pinned axis, deviationId/targetRef carried verbatim, confidence 1, priority 0
+# Γ£ô K-3: the delta direction follows the pinned axis ΓÇö an alignTop violation translates on y only; an alignCenterX violation on x only
+# Γ£ô K-4: an equalWidth violation produces NO proposal ΓÇö the ┬º28 honest gap (the only size capability T06 is origin-anchored: scaling the width moves the object; no SAFE capability exists and the architecture is never bypassed)
+# Γ£ô K-5: the mixed verdict ΓÇö size-class violations stay silent while the position-class violation still proposes (one pass, both faces)
+# Γ£ô K-6: the constraint rule is deterministic ΓÇö identical evaluation records yield byte-identical proposals (ids included)
+# Γ£ô K-7: proposal ordering follows the deviation order ΓÇö priority equals the deviation index (the ┬º30 primary basis)
+# Γ£ô K-8: dedup ΓÇö two accepted constraints whose fixes collapse to the SAME translate intent produce ONE proposal (the first deviation wins, the shared ┬º28 dedup)
+# Γ£ô K-9: the ┬º23 entry consumes the ┬º12 contract ΓÇö non-EvaluationResult input and shape-violating records throw CriticError INVALID_EVALUATION_RESULT (never a shape guess)
+# Γ£ô K-10: a constraint-STYLE deviation WITHOUT constraint provenance produces no proposal ΓÇö the rule engine never guesses constraint semantics from property names alone
+# Γ£ô K-11: an orphan constraintDeviation (its deviationId absent from result.deviations) is skipped ΓÇö no proposal without a live deviation anchor
+# Γ£ô K-12: every proposal is a valid LIVE ┬º25 record whose intent stays inside the transform capability vocabulary (type/targets/operation/params keys only)
+# Γ£ô K-13: the constraint rule is read-only over the evaluation record and the proposals are frozen plain data
+# Γ£ô K-14: integration ΓÇö the proposal intent is PLANNABLE: the LIVE createPlan accepts it and resolves the T05 step with the exact delta (the ┬º26 route back to the doc: proposal -> Planner -> Plan -> DSL -> Transaction)
+# === PHASE 3.16 Category L: Correction Loop Integration (14 tests) ===
+# === PHASE 3.16 Category M: Golden Scenario + Properties + Final Scans (17 tests) ===
+# Γ£ô M-4 (P-2 Identity): the same logical constraint yields the same stable content-derived id across paraphrases, runs, and the acceptance chain; any logical change moves the id
+# Γ£ô M-10: FINAL SCAN ΓÇö no fetch / HTTP / network anywhere in the 3.16 surface (stripped code bodies of all four production files + the test file imports only relative or declared node: builtins)
+# Γ£ô M-11: FINAL SCAN ΓÇö no fs access in the 3.16 production surface (stripped bodies: no fs, no require, no node: specifier) ΓÇö the test file's node:fs import is the declared harness exception
+# Γ£ô M-12: FINAL SCAN ΓÇö no LLM API vocabulary anywhere in the 3.16 surface (stripped bodies: openai, anthropic, llm, completion, embedding, api_key, apikey, chat/completions routes; the test file imports no such module)
+# Γ£ô M-13: FINAL SCAN ΓÇö no direct Store writes in the 3.16 surface: the stripped production bodies carry no store-mutation call form and no store/SceneGraph constructor vocabulary (the arms are pure; the ONLY writer is the transaction pipeline)
+# Γ£ô M-14: FINAL SCAN ΓÇö no direct SceneGraph mutation in the 3.16 surface: no node-creation/reparenting/removal vocabulary in the stripped production bodies
+# Γ£ô M-15: FINAL SCAN ΓÇö no Transaction bypass in the 3.16 surface: the arms never execute, commit, or undo ΓÇö the engine (frozen, sha-pinned) owns every execution
+# Γ£ô M-16: FINAL SCAN ΓÇö no History DAG in the 3.16 surface: no HistoryManager reference in the stripped production bodies; transaction.js and correction.js remain byte-identical to their 3.15 accepted shas (the linear push-truncation implementation is untouched)
+# Γ£ô M-17: FINAL SCAN ΓÇö no nested transactions: the production surface never opens a builder; the ONE-attempt-ONE-transaction contract is the engine's (frozen) and is proven live in L-7
+# Γ£ô M-18: FINAL SCAN ΓÇö src-js/constraint-inference.README.md exists and covers the 14 spec ┬º93 topics (the DoD ┬º96 item 31 pin)
+# Γ£ô M-5 (P-3 Scope): constraint evaluation reads ONLY the referenced objects ΓÇö a constraint over [A,B] is blind to C, at the compliance arm AND at the safety gate
+# Γ£ô L-4: a size-class agenda (metric size.width) resolves the scale-to-target-size recipe but the plan refuses INSUFFICIENT_EVIDENCE ΓÇö T06 is rule-less in the frozen derivation table ΓÇö and the loop terminates UNFIXABLE (the disclosed boundary, never patched)
+# Γ£ô L-12: a critic that keeps reporting the violation is answered with NO_PROGRESS ΓÇö the loop never claims VERIFIED without the authority, even when the substrate was actually corrected
+# Γ£ô L-13: a two-object, two-axis drift under an L-arrangement ΓÇö alignLeft([A,B]) and alignTop([B,C]) both hold at acceptance; moving B right violates the first and moving C down violates the second; the loop sequences two single-axis T05 fixes to VERIFIED (each target's (metric, objectId) pair is unique ΓÇö the disclosed agenda-calibration discipline)
+# Γ£ô M-3 (P-1 Determinism): the whole 3.16 chain is deterministic ΓÇö identical substrate state yields byte-identical evaluation JSON, inference, and critique (Invariant 17)
+# Γ£ô M-6 (P-4 Non-Mutation): the 3.16 chain mutates NOTHING outside transactions ΓÇö the canonical store snapshot is byte-identical across inference, compliance, and critique
+# Γ£ô L-1: a constraint agenda closes through the FROZEN 3.15 CorrectionEngine ΓÇö TERMINATED/VERIFIED in exactly one T05 attempt, the ┬º3 choreography intact
+# Γ£ô L-2: the loop's plan carried the constraint context ΓÇö hardConstraintsPreserved names the hard equalHeight record; softTradeOffs records the violated strong alignLeft (the disclosed trade-off, never silent)
+# Γ£ô L-3: a HARD violated constraint whose pinned axis the fix must mutate is NEVER silently degraded ΓÇö the plan refuses HARD_CONSTRAINT_REJECTED and the loop terminates CONSTRAINT_BLOCKED with zero attempts (P-5 REJECTED face)
+# Γ£ô L-5: a CONSTRAINT-category target hits the frozen zero-recipe table (CONSTRAINT -> CONSTRAINT_VIOLATION, zero recipes) ΓÇö NO_CAPABILITY, honest UNFIXABLE, zero attempts
+# Γ£ô L-6: with NO constraint context on the request, the loop still closes (VERIFIED) and the plan makes NO preserved-constraints claim ΓÇö honest absence, never a false safety record
+# Γ£ô L-7: the correction is ONE independent substrate transaction with a content-derived atx- id ΓÇö distinct from the root and drift transactions; history grows by exactly one per attempt
+# Γ£ô L-8: ┬º22 ΓÇö the loop NEVER self-evaluates: the host critic is called exactly 1 + iterations times with the request document verbatim
+# Γ£ô L-9: the rollback arc under constraint context ΓÇö a target pointing at the WRONG restoration value regresses the relation; ┬º15 declares the regression, ┬º32 undo restores the drifted state, and the constraint records are untouched by the rollback
+# Γ£ô L-11: the history stays LINEAR through a constraint-correction loop (Invariant 13 face) ΓÇö one linear array, currentIndex at the tail, every transaction committed in sequence
+# Γ£ô L-14: the audit trail ΓÇö the attempt carries the transactionId and the plan carries the ┬º11 expectedImprovement (metric position.x, from 130 to 100); the HistoryManager is untouched by session bookkeeping
+# Γ£ô M-1 (┬º67 golden): the END-TO-END loop ΓÇö document -> T19 -> accepted records -> planner pipeline -> drift transaction -> evaluation -> critic -> correction loop -> correction transaction -> re-evaluation -> VERIFIED, with all eleven evidence items live
+# Γ£ô M-7 (P-5 Hard Constraint): accepted hard constraints are never silently degraded ΓÇö the gate REJECTS the conflicting fix (L-3 face), PRESERVES the non-conflicting hard record (golden face), and the store records survive the loop byte-identical
+# Γ£ô M-8 (P-6 Transaction): every store mutation in the golden is inside a committed transaction ΓÇö the linear history covers creations + drift + correction and the arms hold no write path
+# Γ£ô M-9 (P-7 History): constraint corrections never produce non-linear history ΓÇö undo restores without appending, and a post-undo push TRUNCATES the undone attempt (the invariant-13 signature)
+# Γ£ô L-10: loop determinism ΓÇö two rebuilt fixtures produce normalized byte-identical outcome records (status, trail, attempt count, restoration values)
+# Γ£ô M-2 (┬º67 golden determinism): two full golden runs produce byte-identical canonical evidence traces (the disclosed identity-entropy projection)
+# Tests: 107 total, 107 passed, 0 failed
+# Subtest: tests\\constraint-inference.test.mjs
+ok 5 - tests\\constraint-inference.test.mjs
+  ---
+  duration_ms: 1522.0162
+  type: 'test'
+  ...
+# === Constraint Model ===
+# Γ£ô valid constraint
+# Γ£ô invalid constraint missing id
+# Γ£ô invalid ObjectID
+# Γ£ô invalid type
+# Γ£ô invalid strength
+# Γ£ô invalid parameters NaN
+# Γ£ô fixedDistance requires 2
+# Γ£ô fixedDistance requires distance param
+# === BBox Evaluation ===
+# Γ£ô WorldBBox alignment center
+# Γ£ô center X/Y
+# Γ£ô width height
+# Γ£ô distance
+# === Horizontal / Vertical ===
+# Γ£ô horizontal aligns centerY
+# Γ£ô vertical aligns centerX
+# === Align ===
+# Γ£ô alignLeft
+# Γ£ô alignRight
+# Γ£ô alignTop
+# Γ£ô alignBottom
+# Γ£ô alignCenterX
+# Γ£ô alignCenterY
+# === Equal Width/Height ===
+# Γ£ô equalWidth unsatisfiable required
+# Γ£ô equalHeight unsatisfiable required
+# Γ£ô equalWidth satisfied
+# === Fixed Distance ===
+# Γ£ô fixedDistance
+# === Parent Transform ===
+# Γ£ô nested transform evaluation uses WorldBBox
+# === Rotation ===
+# Γ£ô WorldBBox used for rotated objects
+# === Multiple Constraints Deterministic ===
+# Γ£ô deterministic ordering
+# === Required / Conflict / Disabled ===
+# Γ£ô required satisfied
+# Γ£ô unsatisfiable required
+# Γ£ô disabled ignored
+# Γ£ô conflict required vs weak
+# === Undo/Redo ===
+# Γ£ô constraint creation undo/redo via command
+# === Transaction ===
+# Γ£ô no partial state after failed solve
+# === Immutability ===
+# Γ£ô solver does not mutate canonical
+# === Determinism ===
+# Γ£ô same input identical output
+# === Numeric Test ===
+# Γ£ô numeric test alignCenterY A(100,100,100,100) B(300,250,100,100) => B centerY 150 translationY -150
+# === Nested Transform Test ===
+# Γ£ô nested transform parent translate(100,50) child local translate(20,30) uses WorldBBox
+# === Architecture ===
+# Γ£ô ConstraintSolver no direct Store mutation
+# Γ£ô No direct mutation test: solver returns corrections not mutates
+# === Parent Transform Conversion ===
+# Γ£ô world translation to local conversion
+# Tests: 40 total, 40 passed, 0 failed
+# Subtest: tests\\constraints.test.mjs
+ok 6 - tests\\constraints.test.mjs
+  ---
+  duration_ms: 388.1198
+  type: 'test'
+  ...
+# Γ£ô A-1: ┬º5 state vocabulary ΓÇö exactly the 11 CorrectionLoopState values, frozen (spec ┬º5)
+# Γ£ô A-2: ┬º50 termination vocabulary ΓÇö exactly the 9 CorrectionTerminationReason values, frozen
+# Γ£ô A-3: ┬º6 attempt status vocabulary ΓÇö exactly the 7 CorrectionAttempt.status values, frozen
+# Γ£ô A-4: ┬º7 target category + severity vocabularies ΓÇö exactly 11 categories and 4 severities, frozen
+# Γ£ô A-5: ┬º8 root-cause + ┬º9 risk vocabularies ΓÇö exactly 10 root causes and 3 risks, frozen
+# Γ£ô A-6: createCorrectionLoopPolicy() ΓÇö the ┬º18 implementation defaults are EXACT, deep-frozen, and validator-accepted
+# Γ£ô A-7: createCorrectionLoopPolicy(partial) merges over defaults; validator enforces types and bounds
+# Γ£ô A-8: CorrectionTarget ΓÇö deterministic content-derived id, deep-frozen, JSON round-trip lossless, validator accepts
+# Γ£ô A-9: CorrectionTarget validation ΓÇö mandatory fields, enums, confidence range, plain-data-only
+# Γ£ô A-10: CorrectionDiagnosis ΓÇö deterministic id, deep-frozen, round-trip, all 10 root causes constructible
+# Γ£ô A-11: CorrectionDiagnosis validation ΓÇö rootCause enum, confidence range, mandatory targetId, plain-data-only
+# Γ£ô A-12: CorrectionStrategy ΓÇö deterministic id, deep-frozen, round-trip, all 3 risks constructible
+# Γ£ô A-13: CorrectionStrategy validation ΓÇö risk enum, boolean reversible, plain-object commands, mandatory fields
+# Γ£ô A-14: CorrectionPlan ΓÇö embeds valid diagnosis + strategy, deterministic id, deep-frozen, round-trip, validator accepts
+# Γ£ô A-15: CorrectionPlan validation ΓÇö embedded records validated, mandatory sections, plain-data-only
+# Γ£ô A-16: CorrectionAttempt ΓÇö embeds valid target + plan, deterministic id, deep-frozen, round-trip, all 7 statuses constructible
+# Γ£ô A-17: CorrectionAttempt validation ΓÇö status enum, iteration integer, transactionId, plain-data-only, embedded records
+# Γ£ô A-18: createCorrectionLoopSession ΓÇö ┬º4 defaults, deterministic id, deep-frozen, round-trip, validator accepts
+# Γ£ô A-19: session validation ΓÇö mandatory fields, bounds, trail start, TERMINATEDΓƒ║terminationReason in BOTH directions
+# Γ£ô A-20: CORRECTION_LOOP_TRANSITIONS ΓÇö the ┬º3 graph is present verbatim, frozen, and every endpoint is a ┬º5 state
+# Γ£ô A-21: canTransition ΓÇö ┬º3 happy chain, ┬º3 failure paths, and the five disclosed completion edges all legal
+# Γ£ô A-22: canTransition ΓÇö illegal edges are false (IDLE shortcuts, backwards jumps, absorbing TERMINATED)
+# Γ£ô A-23: transitionSession ΓÇö the full ┬º3 happy chain from IDLE to VERIFIED, trail grows exactly, iteration untouched
+# Γ£ô A-24: transitionSession immutability ΓÇö the input session is untouched (deep JSON compare before/after)
+# Γ£ô A-25: transitionSession rejection ΓÇö illegal transitions throw CorrectionError(INVALID_TRANSITION) naming both states
+# Γ£ô A-26: transitionSession input discipline ΓÇö unknown target state and invalid sessions rejected
+# Γ£ô A-27: ┬º3 failure path ΓÇö CORRECTING ->(CORRECTION_FAILED)-> ROLLING_BACK -> DIAGNOSING retry, second cycle reaches VERIFIED, trail records EVERY visit
+# Γ£ô A-28: ┬º3 failure path ΓÇö RE_EVALUATING ->(REGRESSION)-> ROLLING_BACK, then formal termination with EXECUTION_ERROR
+# Γ£ô A-29: ┬º3 edge RE_EVALUATING->TERMINATED is a legal canTransition edge, but the reasonless direct jump is refused (INVALID_TERMINATION) ΓÇö the ┬º50 reason is mandatory
+# Γ£ô A-30: terminateSession ΓÇö happy paths from RE_EVALUATING/VERIFIED/ROLLING_BACK with valid ┬º50 reasons; invalid reasons rejected
+# Γ£ô A-31: TERMINATED is absorbing and illegal sources refuse termination ΓÇö but ┬º53 USER_CANCELLED is legal from ANY active state (any iteration)
+# Γ£ô A-32: determinism (┬º44) ΓÇö two identical session chains produce byte-identical JSON; id stability across the chain
+# Γ£ô B-1: categoryΓåÆrootCause resolution table ΓÇö exactly 11 keys covering every ┬º7 category, frozen, values Γêê ┬º8 causes, UNKNOWN unreachable
+# Γ£ô B-2: capability recipe table ΓÇö frozen, every recipe grounded in a REGISTERED mutation tool (live registry), strictly positive confidence, reversible, scoped
+# Γ£ô B-3: grounding coverage ΓÇö the seven executable causes are covered; SEMANTIC_ERROR/CONSTRAINT_VIOLATION/UNKNOWN are honest gaps whose provenance is the live registry itself
+# Γ£ô B-4: metric matcher dot-boundary discipline ΓÇö prefix matches exact or dot-boundary only; attribution survives where strategy matching fails
+# Γ£ô B-5: resolveCorrectionDiagnosis RESOLVED shape (POSITION) ΓÇö ┬º8 diagnosis with a capability-grounded strategy, deep-frozen end to end
+# Γ£ô B-6: full 11-category sweep ΓÇö 8 categories resolve to the mapped cause; SEMANTIC/TEXT/CONSTRAINT hit the ┬º28 NO_CAPABILITY path with the exact record shape
+# Γ£ô B-7: resolver determinism ΓÇö identical target resolves with identical diagnosis/strategy ids and byte-identical JSON (┬º44)
+# Γ£ô B-8: content-derived ids move with content ΓÇö objectIds change moves the strategy id; confidence change moves the diagnosis id but NOT the strategy id
+# Γ£ô B-9: resolver input discipline ΓÇö invalid target content is refused with INVALID_TARGET before any resolution
+# Γ£ô B-10: ┬º28 SEMANTIC ΓÇö the NO_CAPABILITY resolution is a frozen, self-describing record; the Checkpoint A diagnosis contract (non-empty strategies) stands
+# Γ£ô B-11: ┬º28 CONSTRAINT/TEXT ΓÇö NO_CAPABILITY with live-registry provenance (T19/T20 proposal-class; no text-content editor exists)
+# Γ£ô B-12: CorrectionImpact (┬º20) ΓÇö LOCAL scope for the translate capability: no secondary objects, reversibility mirrors the strategy
+# Γ£ô B-13: CorrectionImpact (┬º20) ΓÇö SUBTREE for hierarchy capabilities (T10) with the affected subtree roots recorded; conservative GLOBAL for unknown toolIds
+# Γ£ô B-14: CorrectionCost (┬º38) ΓÇö deterministic integers: total = riskWeight ├ù (commandCount + objectCount), objectCount deduped across commands
+# Γ£ô B-15: impact/cost input discipline ΓÇö invalid strategy/target refused with the structure-specific codes
+# Γ£ô B-16: ┬º19 ranking, single candidate ΓÇö EXACT priority = Severity(2) ├ù Confidence(1) ├ù Impact(1) ├ù Correctability(1) = 2, factors and cost attached, selected = ranked[0]
+# Γ£ô B-17: ┬º19 ranking, multi-candidate ΓÇö deterministic order with EXACT priorities (input deliberately out of priority order)
+# Γ£ô B-18: ┬º19 ranking tie-break ΓÇö equal priorities keep the diagnosis recommendation order (deterministic stability, no entropy)
+# Γ£ô B-19: ┬º19 strictly-positive property ΓÇö even the worst legal candidate ranks strictly above zero (ranking viability, module-header disclosure 7)
+# Γ£ô B-20: ranking integrity ΓÇö every ranked strategy comes from the diagnosis (never invented, ┬º28), descending monotonicity, and input discipline
+# Γ£ô B-21: ┬º27 explainCorrectionDiagnosis ΓÇö deterministic plain-data explanation (two calls byte-identical), decision DIAGNOSED, >=3 reasons, zero function values
+# Γ£ô B-22: ┬º27 number formatting ΓÇö floats render in canonical JS form inside the summary (no locale, no entropy)
+# Γ£ô B-23: ┬º27 explainCorrectionStrategySelection ΓÇö labeled factors with exact values, priority in the summary, alternatives counted
+# Γ£ô B-24: ┬º27 selection determinism ΓÇö two ranks of identical inputs produce byte-identical explanations
+# Γ£ô B-25: plural resolver ΓÇö target input order preserved, frozen array, non-array input refused
+# Γ£ô C-1: T05 delta derivation ΓÇö position.x/position.y metrics materialize the EXACT factory-anchored delta (┬º43 rule-based prediction, disclosure 19)
+# Γ£ô C-2: T07 opacity derivation ΓÇö appearance.opacity-class metrics materialize the exact opacity; fill-class metrics refuse (no fabricated fill records)
+# Γ£ô C-3: derivation refusals ΓÇö missing targetValue, axis-less position metrics, and rule-less tools are NOT_DERIVABLE with exact missing keys (no fabricated parameters)
+# Γ£ô C-4: derivation CARRY path ΓÇö schema-complete inputs pass through untouched (T10/T11 on structure.grouping); contract shape classes are enforced; input discipline
+# Γ£ô C-5: dependency scan (┬º41) ΓÇö affected objects -> dependencies (ancestor chain) -> constraints -> semantic relationships, injected duck-typed context, input order preserved
+# Γ£ô C-6: dependency scan partial honesty ΓÇö absent stages are reported unscanned (never silently "empty because checked"); input discipline
+# Γ£ô C-7: safety gate PRESERVED (┬º36/┬º37) ΓÇö orthogonal hard constraint survives, soft conflict becomes a recorded trade-off, disabled constraints are invisible
+# Γ£ô C-8: safety gate REJECTED (┬º36) ΓÇö a hard constraint on a mutated axis REJECTS with the exact ┬º35 context; unknown hard types are conservative; appearance/z-order mutations never conflict
+# Γ£ô C-9: scope control (┬º40) ΓÇö command references must stay inside the required set; violations name the exact command and offenders
+# Γ£ô C-10: generateCorrectionPlan READY ΓÇö exact ┬º10 plan content: materialized commands, expectedImprovement, riskAssessment, pre/postconditions (┬º43 rule-based), deep-frozen
+# Γ£ô C-11: generator constraint evidence ΓÇö preserved hard ids land in pre/postconditions; soft trade-offs land in riskAssessment.constraints (┬º37 recorded for D); deterministic ids
+# Γ£ô C-12: generator HARD_CONSTRAINT_REJECTED ΓÇö a plan that would violate a hard constraint is REFUSED with the ┬º35 context and NO plan is emitted (uses a CARRIED strategy: kill-site disjoint)
+# Γ£ô C-13: generator evidence refusals ΓÇö INSUFFICIENT_EVIDENCE for underivable capabilities; OUT_OF_SCOPE for foreign carried objectIds (┬º40); refusal vocabulary frozen
+# Γ£ô C-14: generator coherence discipline ΓÇö strategy must be a recommended strategy of the embedded diagnosis; target/diagnosis/plan-field breaches throw the structure-specific codes
+# Γ£ô C-15: generator determinism (┬º44) ΓÇö identical requests are byte-identical; content changes move the plan id; no-context plans omit the constraints evidence key (disclosed omit-absent)
+# Γ£ô C-16: buildCorrectionPreview (┬º42) ΓÇö exact dry-run record: affectedObjects, commands, ┬º43 RULE_BASED expectedEvaluation, risks with exact ┬º38 cost; SUBTREE variant; deterministic
+# Γ£ô C-17: preview input discipline ΓÇö target/diagnosis incoherence and non-plan inputs are refused with the structure-specific codes
+# Γ£ô C-18: LIVE grounding ΓÇö every generator-emitted command passes the live ToolRegistry validators; every plan kind maps to a REAL transaction.js factory; the local input contract is necessary AND sufficient against the live validators
+# Γ£ô C-19: integrated chain ΓÇö resolve -> rank -> generate -> preview end-to-end frozen and deterministic; the ┬º28 chain-end (NO_CAPABILITY) cannot enter planning
+# Γ£ô C-20: ┬º14 boundary guard (Checkpoint D revision, per the approved C-20 ruling) ΓÇö the acceptance export surface is EXACTLY the D ┬º14 API; planning outputs still carry no acceptance vocabulary
+# Γ£ô D-1: ┬º30 CorrectionFingerprint ΓÇö deterministic content-derived identity of a plan; exact shape; incoherent input refused
+# Γ£ô D-2: evaluation fingerprint + ┬º33 no-progress ╬ö ΓÇö order-insensitive content hash over status + deviation ids; ╬ö=0 Γƒ║ identical state
+# Γ£ô D-3: ┬º31 oscillation detection ΓÇö any recurrence in the evaluation-fingerprint trail is oscillation; clean trails pass; inputs validated
+# Γ£ô D-4: executeCorrectionAttempt (┬º11/┬º12) ΓÇö ONE substrate transaction via TransactionBuilder.begin({id}); the LIVE tool executes; store moves 5 -> 0; exact canonical shapes; deterministic ids
+# Γ£ô D-5: execution pre-flight ΓÇö LIVE registry grounding: unregistered tools and live-validator failures are honest EXECUTION_REFUSED records (never throw, never execute); incoherent inputs throw
+# Γ£ô D-6: execution failure is ATOMIC ΓÇö a runtime tool precondition failure fails the transaction, stores stay untouched, nothing is pushed, FAILED attempt record
+# Γ£ô D-7: independent transaction per attempt ΓÇö two attempts are two linear, independent transactions (own ids, own diffs); no nesting, no DAG
+# Γ£ô D-8: ┬º32 rollback ΓÇö command-inverse path: the exact T05 translation negation is the inverse; the substrate undo restores the store; ROLLED_BACK stage record; double rollback refused
+# Γ£ô D-9: ┬º32 rollback ΓÇö snapshot fallback for non-invertible corrections: the T07 appearance attempt carries a snapshot inverse; the substrate undo restores the appearance byte-exactly
+# Γ£ô D-10: rollback guard ΓÇö the substrate undo is refused when the attempt transaction is NOT top-of-history (never undo a foreign transaction)
+# Γ£ô D-11: ┬º15 regression detection ΓÇö RegressionReport: deviations matched by identity (category|property|objectId); new errors, target-metric regression, and worsened-beyond-tolerance are CRITICAL; frozen + deterministic
+# Γ£ô D-12: ┬º14 acceptance ACCEPTED ΓÇö post > pre on the plan metric; exact criteria evidence; IMPROVED stage record; verdict/reason vocabularies
+# Γ£ô D-13: ┬º14 acceptance REJECTED NO_IMPROVEMENT ΓÇö ╬ö=0 fails the strict post>pre criterion; NO_EFFECT stage; the no-progress path is NOT the rollback path
+# Γ£ô D-14: ┬º14 acceptance REJECTED CRITICAL_REGRESSION ΓÇö the target metric moved backward; REGRESSED stage; the ┬º15 report is embedded evidence
+# Γ£ô D-15: ┬º14 acceptance ΓÇö structural validity (remains-true semantics); a new structure error rejects twice over; a new warning does not reject; pre-existing damage persisting unchanged is not damage by this correction
+# Γ£ô D-16: ┬º16 best-state preservation ΓÇö deterministic total order (errors, then warnings, then canonical id tie-break); isBetter is strict; the incumbent survives worse candidates; the ┬º18 flag disables preservation
+# Γ£ô D-17: ┬º33 no-progress idempotency ΓÇö the SAME correction whose previous application produced ╬ö=0 is SKIPped; ╬öΓëá0 legitimizes the ┬º69 correction-\#2 retry; different corrections never skip
+# Γ£ô D-18: ┬º47/┬º48 ΓÇö session-local history metadata; the HistoryManager stays LINEAR (invariant 13) and UNCHANGED; undo-of-the-AI-operation rides the substrate
+# Γ£ô D-19: integrated chain ΓÇö plan -> execute -> accept (IMPROVED) -> a second correction regresses -> REJECTED -> rollback restores the best state; best-state preservation never assumes last is best
+# Γ£ô D-20: determinism (┬º44) ΓÇö two identical execution+acceptance chains yield byte-identical canonical records; no substrate entropy (uuid/timestamps) leaks into canonical records
+# Γ£ô E-1: ┬º24/┬º26 vocabularies ΓÇö the CorrectionEngine namespace is exactly the five ┬º24 operations; the ┬º26 mode vocabulary and dispatch table are frozen and exact; ┬º17 convergence verdicts obey the disclosed precedence
+# Γ£ô E-2: ┬º25 CorrectionLoopRequest ΓÇö the request contract validates every field; structure-specific codes for structure fields, INVALID_SESSION for the engine envelope (disclosure 33)
+# Γ£ô E-3: ┬º24 start ΓÇö the initial evaluation comes EXCLUSIVELY from the injected critic (positional (document, context) call, exactly once); the session id is content-derived; the engine state shape is exact and frozen
+# Γ£ô E-4: start on an already-satisfied agenda ΓÇö VERIFIED with zero attempts; the ┬º3 machine never engages (no-cycle rule, disclosure 37); the session stays IDLE and carries no termination
+# Γ£ô E-5: ┬º24 run (AUTO) ΓÇö one correction closes the loop: session rides IDLEΓåÆPLANNINGΓåÆEXECUTINGΓåÆEVALUATINGΓåÆVERIFIEDΓåÆTERMINATED on the LIVE substrate; the critic is called exactly iterations+1 times (┬º22 consumer-only)
+# Γ£ô E-6: MAX_ITERATIONS is the hard stop ΓÇö a stubbornly improving agenda runs exactly maxIterations attempts and terminates MAX_ITERATIONS_REACHED from RE_EVALUATING
+# Γ£ô E-7: NO_PROGRESS ΓÇö two consecutive ╬öΓëê0 iterations terminate NO_PROGRESS; the ┬º33 SKIP consumes no execution; the T11 recipe-vs-tool contract gap surfaces as an honest FAILED attempt (disclosure 39)
+# Γ£ô E-8: OSCILLATION ΓÇö AΓåÆBΓåÆA evaluation cycling is detected by the gap-aware ┬º31 scan (adjacent recurrence is no-progress, not oscillation) and terminates OSCILLATION_DETECTED before the budget
+# Γ£ô E-9: ┬º33 SKIP inside the loop ΓÇö a fixed-fiction authority drives SKIP-then-exhaust to NO_PROGRESS with exactly one executed attempt
+# Γ£ô E-10: ┬º22/┬º23 consumer-only ΓÇö call count is exactly iterations+1 with verbatim positional args; a throwing critic propagates without fabricating state; a malformed record is refused INVALID_ATTEMPT
+# Γ£ô E-11: GUIDED ΓÇö propose then WAIT: nothing executes without approval; the ┬º42 preview rides the proposal; approval executes the STORED plan; waiting is idempotent
+# Γ£ô E-12: GUIDED rejection ΓÇö the host rejects the proposal; the cursor advances past it; a single-recipe agenda exhausts to UNFIXABLE with the rejection ledgered
+# Γ£ô E-13: SINGLE_STEP ΓÇö exactly one correction per engine lifetime: STEPPED when unverified (the convergence verdicts still govern termination); further iterates are refused
+# Γ£ô E-14: ┬º26 mode dispatch is deterministic ΓÇö repeated GUIDED runs on a waiting engine are byte-identical pauses; the dispatch never auto-executes an unapproved proposal
+# Γ£ô E-15: terminate ΓÇö USER_CANCELLED rides the ┬º53 overlay from any non-terminated state; engine-driven reasons defer to the ┬º3 machine; double termination is refused
+# Γ£ô E-16: ┬º15 critical regression inside the loop ΓÇö the engine auto-rolls-back through the ┬º3 ROLLING_BACK disposition, re-evaluates the restored state through the critic, retries, and the streak closes the loop; the best state is never the regressed last state
+# Γ£ô E-17: rollback (the ┬º24 op) ΓÇö the host unwinds the last attempt through the substrate's own ┬º32 undo; the engine reports ROLLED_BACK at the ROLLING_BACK position; a spent or empty engine refuses
+# Γ£ô E-18: termination property (┬º17/┬º26) ΓÇö across 48 deterministic scenarios spanning four authority behaviors and three budgets, AUTO run ALWAYS terminates within the budget with a ┬º50 reason and a valid session
+# Γ£ô E-19: ┬º44 engine determinism ΓÇö two identical AUTO runs on fresh substrates yield byte-identical canonical engine records; no substrate entropy (uuid/timestamps) leaks into them
+# Γ£ô E-20: exhaustion mappings ΓÇö NO_CAPABILITY and hard-constraint refusals terminate deterministically from the no-cycle IDLE position with the disclosed ┬º50 reasons
+# Γ£ô E-21: multi-target agenda ΓÇö focus follows the agenda order; the first satisfied target hands the focus to the next; both corrections land in agenda order and the loop verifies
+# Γ£ô E-22: LIVE ┬º12 authority grounding ΓÇö the live evaluate() satisfies the ┬º23 duck-type; the loop consumes its records verbatim; the house-metric vocabulary gap is surfaced honestly (no false fix, no fabricated correction) and a host-side adapter completes the loop end-to-end on the live substrate
+# Γ£ô F-3 (┬º59-C): Correction -> No Progress -> Terminate ΓÇö verify-and-cite (E-7 + E-9) re-proven on the live substrate with LIVE-┬º12-valid authority records
+# Γ£ô F-4 (┬º59-D): A -> B -> A oscillation ΓÇö verify-and-cite (E-8) + the ┬º31 evidence semantics on the live substrate
+# === PHASE 3.15 Checkpoint G: Architecture Tests (spec ┬º52/┬º66) ===
+# Γ£ô G-1: correction.js forbidden-import surface ΓÇö the import contract is EXACTLY ZERO imports (the A-era pin), no dynamic module-escape call (require( / import() exists in the code body, and no node: builtin or bare npm specifier can therefore exist (┬º52/┬º66)
+# Γ£ô G-2: correction.js code body reaches no browser/DOM global, no network, no dynamic-code or Node escape hatch ΓÇö window, fetch, eval, Function, require, globalThis, process, fs, localStorage scanned ALIAS-FORM-AWARE on the stripped body; document scanned in GLOBAL-REACH form with the sanctioned ┬º25 request.document property access carved out (disclosure G-47) (┬º52/┬º66)
+# Γ£ô G-3: correction.js reaches NO store and NO renderer surface and carries no receiver-less mutation method ΓÇö store/stores/Store/Stores absent (the substrate shape has no stores, disclosure 24), render/renderer/RenderTree/invalidate absent (the loop never renders), bare .write/.insert/.remove/.update/.commit/.rollback/.register/.unregister/.render/.invalidate call forms absent, and every bare .set(/.delete( receiver is a pinned local Map binding (┬º52/┬º66; disclosure G-46)
+# Γ£ô G-4: correction.js scene-graph boundary ΓÇö the injected scene graph is reachable ONLY through the read-only projection: every sceneGraph./scene. property access is findNodeByObjectId, the substrate shape carries exactly {registry, transactionManager, transactionBuilder, sceneGraph}, and the SceneGraph type is never referenced or constructed (┬º52/┬º66: no direct SceneGraph mutation)
+# Γ£ô G-5: correction.js HistoryManager boundary ΓÇö the ONLY sanctioned history reach is the ┬º32 top-of-history READ: every historyManager. property access is getTransactionToUndo, the HistoryManager type never appears in code, and no push/write/insert/reorder form exists anywhere (┬º66: no direct manipulation beyond the existing substrate API; the linear-history invariant is cited dynamically ΓÇö D-18, F-5/F-11)
+# Γ£ô G-6: correction.js mutates ONLY through the sanctioned transaction pipeline ΓÇö transactionManager {execute,undo,historyManager}, transactionBuilder {begin,addCommand,build} + the builder alias {addCommand,build}, registry {get,has,validate} (read + schema gate), execute-receivers {tool,transactionManager}, begin-receivers {transactionBuilder}, the WorkingCopy view mirror wc.* pinned, ctx pinned to {constraints,scene,semantic,workingCopy}, and NO substrate machinery constructed (┬º52/┬º66; disclosure G-46)
+# Γ£ô G-7: correction.js runs NO autonomous or deferred execution ΓÇö setInterval, setTimeout, setImmediate, queueMicrotask, addEventListener, requestAnimationFrame, dynamic import(, and new Promise are all absent from the code body; the loop is a synchronous pure-function chain driven by explicit engine operations (┬º66)
+# Γ£ô G-8: loop termination is bounded by MAX_ITERATIONS (┬º66/┬º17/┬º18) ΓÇö static face: EXACTLY ONE while loop exists (the engineRun AUTO loop), its region references policy.maxIterations and the guard, the ┬º17/┬º18 termination-invariant throw is present in the source, SINGLE_STEP carries its stepBudget check, and no unbounded form (while(true)/for(;;)/do{) exists; dynamic face cited (E-18 48-seed battery, F-10 termination grid)
+# Γ£ô G-9: no transaction-nesting API and no History DAG (┬º66) ΓÇö the nesting/DAG vocabulary is absent from the code body, every .begin( receiver is the injected transactionBuilder (per-attempt transactions are SIBLINGS joined by the disclosed parentId lineage, D-era disclosure 25 ΓÇö never nested), and the linear-history invariant is cited dynamically (D-18; F-5/F-11: the undo-truncation signature proves linearity is honest)
+# Γ£ô G-10: zero npm dependencies ΓÇö package.json declares no dependency fields and EVERY src-js runtime module imports only relative specifiers with no dynamic escape (┬º52/┬º66 project rule; the 3.13 G-5 / 3.14 G-8 whole-tree sweeps re-proven for the 3.15 module)
+# Γ£ô G-11: src/core/ is FROZEN ΓÇö the recursive 178-file hash manifest is byte-identical to the frozen generation snapshot (aggregate sha256, re-verified at probe time with buffer==utf8 agreement); the manifest aggregation is proven deterministic and change-sensitive on synthetic input, and the frozen files themselves are never touched (┬º52/┬º66)
+# Γ£ô G-12: scan-harness sanity (anti-vacuity) ΓÇö the stripper demonstrably preserves code AND removes comment/string occurrences on correction.js with 1:1 char/line mapping, so G-2..G-10 cannot pass vacuously (┬º60; the 3.13 G-6 / 3.14 G-7 precedent)
+# Γ£ô F-1 (┬º59-A): Planner -> Execution -> Critic -> Correction -> Evaluation -> Verified ΓÇö the full ┬º58 pipeline on the LIVE substrate closes through the Correction Engine
+# Γ£ô F-2 (┬º59-B): Correction -> Regression -> Rollback ΓÇö the live critic watches the correction regress the alignment; ┬º15 declares CRITICAL; the ┬º32 undo restores the row
+# Γ£ô F-5 (┬º59-E): Linear History Invariant ΓÇö the golden pipeline's HistoryManager stays a flat linear undo stack through creation, error injection, correction, and rollback
+# Γ£ô F-8 (┬º60-P3): Renderer must never mutate document state ΓÇö the golden document renders identically across FRESH builders with byte-identical canonical stores (cite: tests/renderer.test.mjs:552/:355)
+# Γ£ô F-12 (┬º60-P7): CorrectionLoopSession may retain iteration metadata WITHOUT modifying canonical HistoryManager topology (+ D-18 cite)
+# Γ£ô F-6 (┬º60-P1): Correction must never mutate without a transaction ΓÇö every store transition is attributable to committed history entries (+ D-4/D-6/D-7 cite)
+# Γ£ô F-9 (┬º60-P4): Hard constraints must not be violated ΓÇö a required constraint on a mutated axis blocks the correction; an orthogonal required constraint holds numerically (+ C-era KILL-C2 battery, D-15 cite)
+# Γ£ô F-11 (┬º60-P6): HistoryManager must remain linear ΓÇö the invariant-13 property swept across the F scenarios (+ D-18 cite)
+# Γ£ô F-13 (┬º61): GOLDEN SCENARIO ΓÇö 3 rectangles -> planner arrangement -> alignment error -> critic detects -> engine diagnoses -> align executes -> critic re-evaluates -> deviation decreases -> verification passes
+# Γ£ô F-7 (┬º60-P2): Rollback must restore pre-correction state ΓÇö byte-exact restoration on every rollback path (+ D-8/D-9 cite)
+# Γ£ô F-10 (┬º60-P5): The loop must ALWAYS terminate ΓÇö a deterministic live-substrate grid ends, within budget, with a ┬º50 reason and a valid session (cite: E-18, the 48-seed property battery)
+# Tests: 144 total, 144 passed, 0 failed
+# Subtest: tests\\correction.test.mjs
+ok 7 - tests\\correction.test.mjs
+  ---
+  duration_ms: 2557.4513
+  type: 'test'
+  ...
+# === Parser Tests ===
+# Γ£ô valid program
+# Γ£ô malformed JSON
+# Γ£ô missing version
+# Γ£ô unsupported version
+# Γ£ô missing operation
+# Γ£ô unknown operation
+# === Schema Tests ===
+# Γ£ô wrong types width string must fail
+# Γ£ô missing required fields delete without targets
+# Γ£ô invalid enum boolean operation
+# Γ£ô invalid numeric values NaN
+# Γ£ô invalid nested objects transform without args
+# === Reference Tests ===
+# Γ£ô valid reference
+# Γ£ô unknown reference
+# Γ£ô duplicate reference
+# Γ£ô forward reference rejection
+# === Compilation Tests ===
+# Γ£ô create rect must produce T01
+# Γ£ô create ellipse T02
+# Γ£ô delete T04
+# Γ£ô transform translate T05
+# Γ£ô transform matrix T06
+# Γ£ô appearance T07
+# Γ£ô align T08
+# Γ£ô distribute T09
+# Γ£ô group T10
+# Γ£ô boolean T13
+# Γ£ô propose_constraint T19
+# Γ£ô propose_semantic T20
+# === DSL Operations ===
+# Γ£ô create rect
+# Γ£ô update
+# Γ£ô update geometry fields rejected at compile
+# Γ£ô delete
+# Γ£ô transform
+# Γ£ô appearance
+# Γ£ô group
+# Γ£ô ungroup
+# Γ£ô reorder
+# Γ£ô boolean
+# Γ£ô align
+# Γ£ô distribute
+# Γ£ô pointText
+# Γ£ô artboard
+# Γ£ô constraint proposal
+# Γ£ô semantic proposal
+# === Serialization ===
+# Γ£ô serialize deterministic
+# Γ£ô round-trippable
+# === Linter ===
+# Γ£ô linter unused reference warning
+# Γ£ô linter undefined reference error
+# === Critical: Non-Mutation Test ===
+# Γ£ô compile does not mutate stores
+# === Critical: Proposal Test ===
+# === Critical: Rollback Test ===
+# === Critical: Vertical Slice ===
+# === Security ===
+# Γ£ô rejects __proto__
+# Γ£ô rejects eval in args
+# === Determinism ===
+# Γ£ô deterministic compile
+# Γ£ô propose_constraint Proposal returned ConstraintStore unchanged
+# Γ£ô update fill still routes to T07 (appearance path unchanged)
+# Γ£ô vertical slice create red 200x100 rx12 and center
+# Γ£ô rollback on failure atomicity
+# Tests: 55 total, 55 passed, 0 failed
+# Subtest: tests\\dsl.test.mjs
+ok 8 - tests\\dsl.test.mjs
+  ---
+  duration_ms: 483.2244
+  type: 'test'
+  ...
+# === PHASE 3.14 Checkpoint A: error model (spec ┬º54; house style) ===
+# Γ£ô A-1: evaluation error codes exist and EvaluationError behaves like PlanningError
+# Γ£ô A-2: deviation category + severity vocabularies are exactly the ┬º13 enums
+# === PHASE 3.14 Checkpoint A: ActualState construction (spec ┬º10/┬º11) ===
+# Γ£ô A-3: existing rect object is observed read-only with geometry, fill, placement, structure
+# Γ£ô A-4: missing object is observed as exists:false with null observation fields (┬º21 substrate)
+# Γ£ô A-5: WorldBBox = geometryBBox Γèò BBox.transform(local, worldTransform) via public pure pieces (┬º17/┬º51)
+# Γ£ô A-6: ellipse geometry observed with center-anchor params (T02 contract)
+# Γ£ô A-7: unsupported geometry type is observed verbatim with worldBBox null ΓÇö no invented measurement
+# Γ£ô A-8: appearance stack without a fill item observes fill:null (┬º16 substrate honesty)
+# Γ£ô A-9: buildActualState is deterministic ΓÇö identical stores yield byte-identical snapshots (┬º22)
+# Γ£ô A-10: buildActualState does not mutate the canonical stores (┬º42 Layer 1; gate 25 substrate)
+# Γ£ô A-11: ActualState is an immutable snapshot ΓÇö deep-frozen root, entries, and nested values (┬º10/┬º42 Layer 2)
+# Γ£ô A-12: buildActualState rejects a non-conforming document context (duck-typed read surface)
+# Γ£ô A-13: buildActualState rejects invalid evaluation contexts (┬º13 reference grammar, deterministic ambiguity refusal)
+# === PHASE 3.14 Checkpoint A: validateActualState ===
+# Γ£ô A-14: snapshots validate; corrupted variants fail with INVALID_ACTUAL_STATE
+# Γ£ô A-15: validateActualState rejects non-object input and empty-object entries
+# === PHASE 3.14 Checkpoint A: Deviation (spec ┬º13) ===
+# Γ£ô A-16: createDeviation returns a frozen structured record with a content-derived id (┬º13/┬º12)
+# Γ£ô A-17: deviation id is content-derived ΓÇö identical content yields identical id, content change moves the id (┬º22, gate 8)
+# Γ£ô A-18: absent optional deviation fields normalize to null; all 11 keys stay present
+# Γ£ô A-19: createDeviation enforces the ┬º13 content contract (deterministic refusals)
+# Γ£ô A-20: validateDeviation ΓÇö valid records pass; every missing ┬º13 key fails; targetRef key is mandatory (gate 7)
+# Γ£ô A-21: both ┬º13 reference kinds are accepted in targetRef ($doc: and $stepId)
+# === PHASE 3.14 Checkpoint A: EvaluationResult (spec ┬º12) ===
+# Γ£ô A-22: PASS result ΓÇö zero deviations => status PASS exactly (gate 5)
+# Γ£ô A-23: DEVIATION result ΓÇö one deviation => status DEVIATION exactly (gate 5, other direction)
+# Γ£ô A-24: metadata is optional, defaults to a frozen empty object, and carries caller content verbatim (deterministic only)
+# Γ£ô A-25: createEvaluationResult rejects invalid inputs with the ┬º54 error model
+# Γ£ô A-26: validateEvaluationResult enforces the status/length equivalence in BOTH directions (gate 5 enforcement)
+# === PHASE 3.14 Checkpoint A: determinism (┬º22, gates 10/13/14) ===
+# Γ£ô A-27: repeated evaluation-model runs over identical state produce identical JSON ΓÇö and no wall-clock entropy exists
+# Γ£ô A-28: the model layer contains no entropy sources ΓÇö Date.now / random-UUID tokens absent from evaluation.js (gates 9/10)
+# === PHASE 3.14 Checkpoint A: A-era source guard (3.13 precedent ai.test.mjs:225; full G-pattern suite = Checkpoint G, spec ┬º60) ===
+# Γ£ô A-29: import contract ΓÇö evaluation.js imports exactly the two public pure-piece modules, all specifiers relative
+# Γ£ô A-30: forbidden capability surfaces are absent from evaluation.js source (raw-scan A-era)
+# Γ£ô A-31: no mutation-surface calls in evaluation.js ΓÇö stores are read via get/has/list only (┬º52, gates 25-27 substrate)
+# Γ£ô A-32: gate 3 ΓÇö the measured-status escape hatch is not used: the token never appears in evaluation.js (┬º07/┬º62)
+# Γ£ô A-33: the evaluation module does not import the Planner or any store class ΓÇö document context is injected (┬º06/┬º10/┬º11)
+# === PHASE 3.14 Checkpoint B: entry contract (spec ┬º12/┬º55) ===
+# Γ£ô B-1: vertical slice PASS ΓÇö perfect execution yields status PASS, zero deviations, no false deviations (┬º37)
+# Γ£ô B-2: evaluate refuses malformed expected input ΓÇö shape, desired-status marker, transform section contract
+# Γ£ô B-3: centered expectation without an artboard is MISSING_PARAMETER ΓÇö the artboard is never guessed (┬º17); bbox-only expectations need no artboard
+# Γ£ô B-4: evaluate propagates the injected-context contracts (doc read surface + evaluation context)
+# === PHASE 3.14 Checkpoint B: E1 existence (spec ┬º21) ===
+# Γ£ô B-5: missing object produces exactly one existence deviation with the target binding; deeper checks short-circuit (┬º21)
+# Γ£ô B-6: deviation order is target-major ΓÇö the existing targetΓÇÖs deviations precede the missing targetΓÇÖs existence deviation
+# === PHASE 3.14 Checkpoint B: E2 geometry (spec ┬º15, tolerance ┬º14) ===
+# Γ£ô B-7: ellipse geometry evaluates through the builderΓÇÖs own formulas (rx/ry/area=PI*rx*ry/symmetric)
+# Γ£ô B-8: width deviation carries expected/actual/delta(actual-expected)/tolerance; derived area follows (┬º38 shapes)
+# Γ£ô B-9: tolerance boundary ΓÇö within 1e-9 no deviation, beyond it a deviation (┬º14/┬º15: abs(actual-expected) <= tolerance)
+# Γ£ô B-10: ry and derived symmetric deviations fire in fixed property order
+# Γ£ô B-11: observed counterpart missing (params without rx/ry) reports actual:null with tolerance:null ΓÇö never invented
+# === PHASE 3.14 Checkpoint B: E3 appearance (spec ┬º16/┬º50) ===
+# Γ£ô B-12: hex normalization ΓÇö \#FF0000, \#f00 and \#ff0000 all match the canonical substrate RGBA (no representation mismatch)
+# Γ£ô B-13: fill color deviation compares in canonical RGBA space on BOTH sides (┬º39)
+# Γ£ô B-14: expected fill with no observed fill item is a deviation (expected hex, actual null)
+# Γ£ô B-15: non-solid observed fill kind is a deviation (hex expectation corresponds to solid, ┬º16)
+# Γ£ô B-16: an inert (disabled) fill does not satisfy the fill expectation ΓÇö one fill.enabled deviation, no color noise
+# Γ£ô B-17: opacity compares against the observed fill item opacity with the appearance tolerance
+# Γ£ô B-18: stroke expectation is self-reported as unevaluated, never silently dropped and never invented into a deviation (┬º16 MVP)
+# === PHASE 3.14 Checkpoint B: E4 placement (spec ┬º17) ===
+# Γ£ô B-19: centered placement ΓÇö matching center passes; drifted center yields one center deviation vs the artboard center
+# Γ£ô B-20: centered expectation with an unmeasurable geometry (worldBBox null) reports actual:null ΓÇö honest, not invented
+# Γ£ô B-21: bbox expectation ΓÇö four-edge comparison with per-edge deltas; artboard not required for bbox-only placement
+# === PHASE 3.14 Checkpoint B: E5 structure (spec ┬º18) ===
+# Γ£ô B-22: grouped expectation compares both directions against the observed parent-is-group fact
+# === PHASE 3.14 Checkpoint B: E6 semantic (spec ┬º20) ===
+# Γ£ô B-23: a semantic expectation section is self-reported unevaluated ΓÇö no semantic deviation is ever invented (┬º20)
+# === PHASE 3.14 Checkpoint B: E7 transform (spec ┬º19) ===
+# Γ£ô B-24: null/absent transform expectations generate NO transform deviations (┬º19); malformed transform contracts are refused
+# Γ£ô B-25: non-null transform expectations compare per-key against the observed world transform
+# === PHASE 3.14 Checkpoint B: determinism, ordering, purity, contract (spec ┬º22, ┬º42) ===
+# Γ£ô B-26: repeated evaluation over identical state is byte-identical (┬º22/┬º67)
+# Γ£ô B-27: declared deviation order ΓÇö target-major, category rank (existence..transform), fixed property order (gate 11)
+# Γ£ô B-28: evaluate does not mutate canonical stores or hierarchy (┬º42 Layer 1; gate 25)
+# Γ£ô B-29: tolerance contract ΓÇö EVALUATION_TOLERANCES exported, frozen, uniform 1e-9 (geometry kernel discipline, ┬º14)
+# Γ£ô B-30: source scan ΓÇö fill normalization is local (no dsl import, no substrate-parser identifier), import contract unchanged (┬º50)
+# === PHASE 3.14 Checkpoint C: entry contract (spec ┬º23/┬º25/┬º56) ===
+# Γ£ô C-1: proposeCorrections on a PASS EvaluationResult yields an empty frozen proposal array (┬º23)
+# Γ£ô C-2: proposeCorrections refuses non-EvaluationResult input (consumes the ┬º12 contract, not a shape guess)
+# Γ£ô C-3: source scan ΓÇö critic.js imports exactly the evaluation contract, is read-only, and carries no entropy (┬º24/┬º29, gates 21/25-27 substrate)
+# === PHASE 3.14 Checkpoint C: rule engine ΓÇö supported corrections (spec ┬º27) ===
+# Γ£ô C-4: geometry deviation -> ONE create-rebuild proposal from the desired-state projection; derived area deviation dedupes into it (┬º27)
+# Γ£ô C-5: ellipse geometry deviation rebuilds the ellipse create projection (rx/ry, no width/height)
+# Γ£ô C-6: fill.color deviation -> appearance proposal restoring the requested hex via T07 capability (┬º16/┬º27)
+# Γ£ô C-7: fill.kind deviation -> the same appearance-fill correction (restoration value comes from the ExpectedState, not the deviation)
+# Γ£ô C-8: missing fill deviation -> appearance-fill proposal (the T07 capability covers the absent-fill case)
+# Γ£ô C-9: opacity deviation -> appearance proposal carrying the requested opacity (T07 opacity-only, tools.js:375-378)
+# Γ£ô C-10: placement center deviation -> translate proposal with delta = expected center - observed center (T05 delta semantics, ai.js:777-779)
+# Γ£ô C-11: transform tx deviation -> translate proposal ONLY when the ExpectedState carries the non-null expectation (user directive)
+# === PHASE 3.14 Checkpoint C: rule engine ΓÇö unsupported corrections produce NO proposal (spec ┬º28, never bypass) ===
+# Γ£ô C-12: existence deviations propose nothing ΓÇö the ExpectedState carries no creation binding (┬º28)
+# Γ£ô C-13: structure deviations propose nothing in MVP ΓÇö grouped:true needs >=2 targets (T10, ai.js:840-845); grouped:false targets a group NODE id the object-targeted intent grammar cannot carry (T11, ai.js:834/tools.js:517-525)
+# Γ£ô C-14: semantic deviations propose nothing in MVP (no tool supports semantic mutation, ┬º27)
+# Γ£ô C-15: transform deviations for matrix keys (a/b/c/d) propose nothing ΓÇö no safe capability maps node-matrix components (┬º28)
+# Γ£ô C-16: the transform rule is dormant when the ExpectedState carries no transform expectations ΓÇö no proposal despite a transform-shaped deviation
+# Γ£ô C-17: placement bbox-edge deviations propose nothing ΓÇö the moving corner is ambiguous (┬º28); transform deviations with unobservable actual propose nothing
+# === PHASE 3.14 Checkpoint C: dedup + ordering + determinism (spec ┬º29/┬º30) ===
+# Γ£ô C-18: deduplication ΓÇö identical corrections for the same target collapse to the first deviation (┬º28-safe)
+# Γ£ô C-19: proposal ordering follows the deviation order; priority = deviation index (┬º30: deviation order is the primary basis)
+# Γ£ô C-20: repeated critique over identical state is byte-identical (┬º29/┬º67)
+# Γ£ô C-21: the Critic does not mutate canonical stores (┬º24; gate 21)
+# === PHASE 3.14 Checkpoint C: CorrectionProposal validation (spec ┬º25/┬º28) ===
+# Γ£ô C-22: createCorrectionProposal builds a frozen 7-field record with a content-derived id; the intent vocabulary mirrors the planning capabilities
+# Γ£ô C-23: createCorrectionProposal enforces the ┬º25/┬º28 content contract (deterministic refusals)
+# Γ£ô C-24: validateCorrectionProposal ΓÇö every missing ┬º25 key invalidates; round-trips validate
+# Γ£ô C-25: proposal ids are content-derived ΓÇö identical content yields identical ids, any content change moves the id (┬º29, gate 9)
+# === PHASE 3.14 Checkpoint D: Evaluation + Critic integration (spec ┬º42/┬º57) ===
+# Γ£ô D-1: evaluateAndCritique is the single ┬º57 entry ΓÇö returns the frozen { evaluationResult, proposals } pair; PASS end-to-end
+# Γ£ô D-2: DEVIATION end-to-end ΓÇö every proposal references a deviation OF THE SAME result and carries its targetRef exactly
+# Γ£ô D-3: targetRef flow ΓÇö every deviation.targetRef is SET (never undefined, ┬º13 grammar) and flows onto its proposal unaltered
+# Γ£ô D-4: plan-level deviations (targetRef:null) -> plan-level proposals carrying null, or no proposal per rule (┬º13/┬º21/┬º28)
+# Γ£ô D-5: determinism of the composed output ΓÇö repeated runs byte-identical (sha256-equal) and orchestrator === manual two-step composition (┬º29/┬º67)
+# Γ£ô D-6: ┬º42 Layer 1 on the integrated path ΓÇö the full pipeline (evaluation + critique) leaves stores, hierarchy, and the ExpectedState input untouched
+# Γ£ô D-7: ┬º42 Layer 2 ΓÇö the ActualState embedded in the integrated output is a deep-frozen immutable snapshot
+# Γ£ô D-8: ┬º42 Layer 3 ΓÇö critique mutates neither the canonical stores nor the EvaluationResult it consumes
+# Γ£ô D-9: ┬º42 Layer 4 ΓÇö CorrectionProposal is not execution authority: inert frozen plain data, planning vocabulary only
+# Γ£ô D-10: honest empty-proposal integration ΓÇö a missing target yields DEVIATION + existence deviation + zero proposals, end to end (┬º21/┬º28)
+# === PHASE 3.14 Checkpoint E: vertical slice (spec ┬º36-┬º41/┬º58) ===
+# === PHASE 3.14 Checkpoint F: correction boundary (spec ┬º32/┬º33/┬º41/┬º59) ===
+# === PHASE 3.14 Checkpoint G: Architecture Tests (spec ┬º52/┬º60) ===
+# Γ£ô G-1: evaluation.js forbidden-import surface ΓÇö the import contract is exactly the two public pure-piece modules, every specifier relative (no fs, no node:, no bare npm), and the code body carries no dynamic module-escape call (┬º52/┬º60)
+# Γ£ô G-2: evaluation.js code body reaches no browser/DOM global, no network, no dynamic-code or Node escape hatch ΓÇö window, document, fetch, eval, Function, require, globalThis, process, fs, localStorage scanned on the comment/string-stripped body in ALIAS-FORM-AWARE word-boundary form (┬º52/┬º60)
+# Γ£ô G-3: evaluation.js calls no substrate mutation method and reaches no tool/transaction execution surface ΓÇö Store.write, .set, .delete, Transaction.execute, Tool.execute, History.write and the full disclosed mutation vocabulary are structurally absent from the stripped body (┬º52/┬º60: the only mutation path is Plan -> DSL -> Tool Registry -> Transaction -> Commit, never the evaluator)
+# Γ£ô G-4: critic.js forbidden-import surface ΓÇö the import contract is exactly the evaluation contract module, every specifier relative (no fs, no node:, no bare npm), and the code body carries no dynamic module-escape call (┬º52/┬º60)
+# Γ£ô G-5: critic.js code body reaches no browser/DOM global, no network, no dynamic-code or Node escape hatch ΓÇö the same alias-form-aware word-boundary surface as G-2 (┬º52/┬º60)
+# Γ£ô G-6: critic.js calls no substrate mutation method and statically carries NO tool execution surface ΓÇö no toolRegistry, no TransactionExecutor/TransactionBuilder, no DSLExecutor, no createCoreToolRegistry, no execute/commit reference of any form (┬º52/┬º60: a proposal is data, never execution; the F-3 static scan upgraded to the comment/string-aware G pattern)
+# Γ£ô G-7: scan-harness sanity (anti-vacuity) ΓÇö the stripper demonstrably preserves code AND removes comment/string occurrences on BOTH modules with 1:1 char/line mapping, so G-2..G-6 cannot pass vacuously (┬º60; the 3.13 G-6 precedent)
+# Γ£ô G-8: zero npm dependencies ΓÇö package.json declares no dependency fields and every src-js runtime module imports only relative specifiers (┬º52/┬º60 project rule; the 3.13 G-5 whole-tree sweep re-proven for the 3.14 modules)
+# Γ£ô G-9: src/core/ is FROZEN ΓÇö the recursive 178-file hash manifest is byte-identical to the Checkpoint-G generation snapshot (generated from a git-clean tree); the manifest aggregation is proven deterministic and change-sensitive on synthetic input, and the frozen files themselves are never touched (┬º52/┬º60)
+# Γ£ô E-S1: vertical slice 1 ΓÇö perfect execution: the REAL pipeline commits 3 steps and ExpectedState === ActualState -> PASS, zero deviations, zero proposals (┬º36/┬º37/┬º58)
+# Γ£ô E-S2: vertical slice 2 ΓÇö geometry deviation: width 200 -> 190 caught with category/property/expected/actual/delta=-10/targetRef exactly, one capability-backed rebuild proposal (┬º38)
+# Γ£ô E-S6: the ┬º31/┬º32 loop boundary holds across slices ΓÇö stateless critique, invariant history, no execution authority on either 3.14 module surface
+# Γ£ô F-3: no tool/transaction execution surface ΓÇö critic.js statically carries none, and at runtime the critique reads the stores through the injected surface while committing nothing and touching no mutation method (┬º24/┬º26/┬º59)
+# Γ£ô F-4: no uncontrolled loop (┬º32) ΓÇö the correction boundary is a single EXPLICIT invocation; no self-scheduling machinery exists on either 3.14 module; explicit re-invocations terminate identically without accumulation (┬º31)
+# Γ£ô E-S3: vertical slice 3 ΓÇö appearance deviation: the hex expectation is normalized to RGBA and compared against the canonical AppearanceStore representation (┬º39)
+# Γ£ô E-S4: vertical slice 4 ΓÇö placement deviation: the observed WorldBBox is composed from public pure pieces (geometryBBox + world transform) and the center drift is caught deterministically (┬º40)
+# Γ£ô E-S5: vertical slice 5 ΓÇö correction handoff: the proposal reaches Planner INPUT (validateIntent + createPlan + validatePlan) and NOTHING executes; the loop terminates (┬º41)
+# Γ£ô F-2: the correction Plan is a NEW plan ΓÇö a fresh deep-frozen object from an independent createPlan invocation, never a mutation of or an alias to the executed plan (┬º26/┬º59)
+# Γ£ô F-1: correction handoff at module level ΓÇö proposal.intent is valid Planner input (validateIntent -> createPlan -> validatePlan) for the geometry + appearance + placement proposal types, and the handoff is a GATE the Planner owns (┬º26/┬º41/┬º59)
+# Γ£ô F-6: the read-only boundary ΓÇö the CorrectionProposal is inert data: exactly the 7 ┬º25 keys, no execution-authority key surface, plain deep-frozen data, and a lossless JSON round-trip (┬º25/┬º26/┬º59)
+# Γ£ô E-S7: determinism matrix ΓÇö every slice twice byte-identical; different controlled deviations provably move the digest; the same drift in two slices is byte-identical (┬º67/┬º22)
+# Γ£ô F-5: the no-progress boundary is DEFINED and detectable (┬º33) ΓÇö materially identical deviation content across cycles is fingerprinted deterministically; the MVP response is defined, bounded, and non-escalating; no autonomous looping is implemented (┬º33 mandate)
+# Tests: 120 total, 120 passed, 0 failed
+# Subtest: tests\\evaluation-critic.test.mjs
+ok 9 - tests\\evaluation-critic.test.mjs
+  ---
+  duration_ms: 1468.546
+  type: 'test'
+  ...
+# Γ£ô rect normal
+# Γ£ô rect rounded radius normalization
+# Γ£ô rect degenerate allowed
+# Γ£ô ellipse bbox
+# Γ£ô ellipse degenerate
+# Γ£ô ellipse to path anchors
+# Γ£ô polygon triangle area
+# Γ£ô polygon orientation cw in Y-down
+# Γ£ô polygon bbox
+# Γ£ô star 5-point deterministic
+# Γ£ô star invalid points
+# Γ£ô star invalid radius
+# Γ£ô line length
+# Γ£ô line zero-length degenerate
+# Γ£ô bezier t=0 and t=1
+# Γ£ô bezier bbox exact extrema
+# Γ£ô path open and closed
+# Γ£ô contour orientation cw
+# Γ£ô fillRule separation
+# Γ£ô parametric to derived rect
+# Γ£ô parametric to derived ellipse
+# Γ£ô parametric to derived polygon
+# Γ£ô parametric to derived star
+# Γ£ô parametric to derived line
+# Γ£ô derived to parametric detection rect
+# Γ£ô derived to parametric detection null for complex
+# Γ£ô flattening tolerance
+# Γ£ô flattening closed remains closed
+# Γ£ô flattening deterministic
+# Γ£ô validation finite
+# Γ£ô degenerate detection
+# Γ£ô self-intersection bow-tie
+# Γ£ô distance point to segment
+# Γ£ô point in polygon
+# Γ£ô transform translate
+# Γ£ô transform does not mutate source
+# Γ£ô mandatory numeric test Rect x=0 y=0 w=200 h=100 T(100,50)
+# Tests: 37 total, 37 passed, 0 failed
+# Subtest: tests\\geometry.test.mjs
+ok 10 - tests\\geometry.test.mjs
+  ---
+  duration_ms: 390.3536
+  type: 'test'
+  ...
+# === Pointer State Machine ===
+# Γ£ô Pressed -> Click -> Idle
+# === Marquee ===
+# Γ£ô marquee hidden and locked excluded
+# === Transform ===
+# Γ£ô transform handle priority over object hit
+# === Anchor ===
+# Γ£ô anchor one transaction on commit
+# === Undo/Redo (manual-simulation regression guards, see header) ===
+# Γ£ô move undo restores original
+# Γ£ô anchor undo restores exact original
+# === SpatialIndex Integration ===
+# Γ£ô spatial index updated after move
+# === Renderer Integration (F-1 two-instance fix, Step 5b) ===
+# Γ£ô renderer updates after commit (drag path)
+# Γ£ô renderer updates after commit (transform path)
+# === Browser Independence ===
+# Γ£ô Core does not import window/document
+# === No AI Dependency ===
+# Γ£ô No AI dependency
+# === No Direct Geometry Mutation ===
+# Γ£ô No direct geometry mutation
+# === Input Abstraction ===
+# Γ£ô KeyboardInput abstract
+# Tests: 13 total, 13 passed, 0 failed
+# Subtest: tests\\interaction-boundaries.test.mjs
+ok 11 - tests\\interaction-boundaries.test.mjs
+  ---
+  duration_ms: 421.6536
+  type: 'test'
+  ...
+# === HitTest ===
+# Γ£ô single rect
+# Γ£ô overlapping rects
+# Γ£ô ellipse
+# Γ£ô path
+# Γ£ô polygon
+# Γ£ô star
+# Γ£ô stroke
+# Γ£ô fill
+# Γ£ô open line
+# Γ£ô hidden object
+# Γ£ô locked object
+# Γ£ô nested groups
+# === Z-Order ===
+# Γ£ô Z-order topmost wins
+# Γ£ô Z-order reverse
+# === Selection ===
+# Γ£ô select node
+# Γ£ô deselect node
+# Γ£ô toggle
+# Γ£ô replaceSelection
+# Γ£ô addToSelection
+# Γ£ô removeFromSelection
+# Γ£ô clearSelection
+# Γ£ô setActiveNode
+# Γ£ô selection ordering deterministic
+# Γ£ô selection transient
+# === State Machine ===
+# Γ£ô Idle -> Hover -> Pressed -> Dragging -> Idle
+# Γ£ô Cancel restores Idle
+# === Hover ===
+# Γ£ô hover update
+# Γ£ô hover no transaction
+# === Drag ===
+# Γ£ô drag preview no mutate
+# Γ£ô drag threshold
+# Γ£ô drag transaction boundary one gesture one transaction
+# === Marquee ===
+# Γ£ô marquee selection
+# Γ£ô marquee no mutate
+# === Transform ===
+# Γ£ô move preview no mutate
+# Γ£ô scale
+# Γ£ô rotate
+# Γ£ô transform handle hit
+# === Anchor ===
+# Γ£ô anchor selection
+# Γ£ô anchor move preview no mutate
+# Γ£ô smooth anchor
+# Γ£ô symmetric anchor
+# === Keyboard ===
+# Γ£ô arrow key transaction
+# Γ£ô shift arrow
+# Γ£ô delete transaction
+# Γ£ô escape cancels
+# === Immutability ===
+# Γ£ô canonical unchanged during preview
+# === Architecture ===
+# Γ£ô no direct Store.write
+# Γ£ô no direct GeometryStore.write
+# Γ£ô no direct SceneGraph mutation
+# Γ£ô no History mutation
+# Γ£ô no Renderer mutation
+# === Input Abstraction ===
+# Γ£ô PointerInput abstract
+# Γ£ô ViewportTransform
+# === Overlay ===
+# Γ£ô overlay transient
+# Γ£ô selection bounds handles
+# Tests: 55 total, 55 passed, 0 failed
+# Subtest: tests\\interaction.test.mjs
+ok 12 - tests\\interaction.test.mjs
+  ---
+  duration_ms: 382.8356
+  type: 'test'
+  ...
+# === RenderTree ===
+# Γ£ô empty document
+# Γ£ô single rect
+# Γ£ô multiple objects
+# Γ£ô nested groups
+# Γ£ô ordered children
+# Γ£ô hidden object
+# Γ£ô locked object
+# === Transform ===
+# Γ£ô root transform
+# Γ£ô parent + child transform
+# Γ£ô deep hierarchy
+# Γ£ô rotation
+# Γ£ô scale
+# Γ£ô combined transform
+# Γ£ô Mandatory numeric test Parent translate(100,50) Child translate(10,10) scale(2)
+# === Geometry ===
+# Γ£ô rect
+# Γ£ô rounded rect
+# Γ£ô ellipse
+# Γ£ô line
+# Γ£ô polygon
+# Γ£ô star
+# Γ£ô path
+# === Fill Rule ===
+# Γ£ô nonZero vs evenOdd distinction
+# Γ£ô Renderer respects fillRule
+# === Appearance ===
+# Γ£ô solid fill
+# Γ£ô solid stroke
+# Γ£ô stroke width
+# Γ£ô opacity
+# Γ£ô renderer reads AppearanceStore but never mutates it
+# === Parametric Preservation ===
+# Γ£ô Rect remains parametric after render
+# Γ£ô Ellipse remains parametric
+# Γ£ô Star remains parametric
+# === Immutability ===
+# Γ£ô Canonical stores unchanged after render
+# === Invalidation ===
+# Γ£ô Move object
+# Γ£ô Change fill
+# Γ£ô Hide object
+# Γ£ô Group transform invalidates descendants
+# === Event Tests ===
+# Γ£ô Transaction begins -> no renderer update
+# Γ£ô Transaction fails -> no renderer update
+# Γ£ô Transaction commits -> renderer invalidation occurs
+# === No Direct Mutation ===
+# Γ£ô Renderer does not expose store write
+# Γ£ô Renderer core does not import browser APIs
+# === Architecture ===
+# Γ£ô Renderer READS canonical state
+# Γ£ô Renderer does not mutate canonical state
+# Γ£ô Renderer subscribes to EventBus
+# === Determinism ===
+# Γ£ô Deterministic RenderTree
+# === Error Handling ===
+# Γ£ô Missing geometry handled safely
+# Γ£ô Missing appearance handled safely
+# Γ£ô Unsupported appearance handled safely
+# Γ£ô Invalid geometry handled safely
+# === Canvas2D Backend Isolation ===
+# Γ£ô Core does not depend on browser APIs
+# Γ£ô Canvas2DAdapter isolated
+# === Viewport Culling ===
+# Γ£ô Viewport culling supported
+# Tests: 52 total, 52 passed, 0 failed
+# Subtest: tests\\renderer.test.mjs
+ok 13 - tests\\renderer.test.mjs
+  ---
+  duration_ms: 317.852
+  type: 'test'
+  ...
+# === SceneGraph ===
+# Γ£ô Create root
+# Γ£ô Create child
+# Γ£ô Create empty group
+# Γ£ô Parent/child consistency
+# Γ£ô Multiple children
+# Γ£ô Child ordering
+# Γ£ô Insert child at index
+# Γ£ô Move child ordering
+# Γ£ô Remove child
+# Γ£ô Remove node
+# Γ£ô Reparent node
+# Γ£ô Reparent to root
+# Γ£ô Reject self-parent
+# Γ£ô Reject cycle
+# Γ£ô Reject missing parent
+# Γ£ô Reject invalid ObjectID
+# Γ£ô Find node by NodeID
+# Γ£ô Find node by ObjectID
+# Γ£ô Depth-first traversal
+# Γ£ô Multiple roots if supported
+# === World Transform ===
+# Γ£ô Root local transform
+# Γ£ô Parent + child transform
+# Γ£ô Mandatory numeric example Parent T(100,50) Child T(10,10)*Scale(2) World [2 0 110; 0 2 60]
+# Γ£ô Transform point (0,0) -> (110,60)
+# Γ£ô Nested 3-level hierarchy
+# Γ£ô Rotation
+# Γ£ô Scale
+# Γ£ô Combined transformation
+# Γ£ô Pivot rotation
+# Γ£ô Singular matrix detection
+# Γ£ô Cache invalidation after local transform
+# Γ£ô Cache invalidation after reparent
+# Γ£ô Descendant invalidation
+# === BBox ===
+# Γ£ô Node WorldBBox
+# Γ£ô Translated WorldBBox
+# Γ£ô Scaled WorldBBox
+# Γ£ô Nested WorldBBox
+# Γ£ô Empty group behavior
+# Γ£ô Group BBox from descendants
+# === Immutability ===
+# Γ£ô World calculation does not mutate local transform
+# Γ£ô Geometry remains parametric after SceneNode transform
+# Tests: 41 total, 41 passed, 0 failed
+# Subtest: tests\\scenegraph.test.mjs
+ok 14 - tests\\scenegraph.test.mjs
+  ---
+  duration_ms: 277.8322
+  type: 'test'
+  ...
+# Γ£ô N-1: the module exists and exports createInferenceSession
+# Γ£ô N-2: session API shape ΓÇö ingest/getRecords/getRefusals/getRegistry
+# Γ£ô N-3: normalized record shape matches BD-1..BD-6 (exact key set, field mapping)
+# Γ£ô N-4: role vocabulary = T20's 7 emitted roles ΓÇö no VALID_ROLES mapping, no aliases (BD-1)
+# Γ£ô N-5: content-derived id determinism ΓÇö same content, same id; entropy and key order irrelevant; evidence moves the id (BD-5)
+# Γ£ô N-6: confidence preserved verbatim ΓÇö no rounding, no clamping, NO threshold (BD-3, spec ┬º36)
+# Γ£ô N-7: evidence preserved verbatim ΓÇö multi-row, empty, and missing; copied, never aliased (BD-4)
+# Γ£ô N-8: source === 'T20' ΓÇö the tool is the origin, 'heuristic' is the algorithm (BD-4, spec ┬º37)
+# Γ£ô N-9: status === 'PROPOSED' on every accepted record
+# Γ£ô N-10: no entropy in normalized output ΓÇö no RNG/wall-clock fields, no RNG/wall-clock in the module (BD-5, spec ┬º19)
+# Γ£ô N-11: unsupported role -> refusal per BD-6 (+ T20 failure envelope -> T20_FAILED)
+# Γ£ô N-12: malformed T20 result -> MALFORMED refusal ΓÇö never throws
+# Γ£ô N-13: empty proposal set -> empty records, empty refusals (honest no-op)
+# Γ£ô N-14: unknown role -> accepted as a real role (BD-2a), engine no-evidence shape verbatim
+# Γ£ô N-15: deep-frozen records AND refusals; upstream is a session-owned frozen copy ΓÇö the caller object is never frozen (BD-6, no aliasing)
+# Γ£ô N-16: zero imports ΓÇö static source scan of src-js/semantic-inference.js (spec ┬º44)
+# Γ£ô N-17: determinism ΓÇö two sessions over the same ingest sequence produce byte-identical registries (spec ┬º19)
+# Γ£ô O-1: PlanningContext accepts an optional `semantic` array; deep-frozen (CD-5, the 3.16 mirror)
+# Γ£ô O-2: existing PlanningContext callers unchanged ΓÇö no `semantic` field -> byte-identical behavior (CD-2)
+# Γ£ô O-3: ExpectedState.semantic.satisfied admits null and boolean ΓÇö the 3.16 constraint.satisfied mirror (CD-1)
+# Γ£ô O-4: ExpectedState.semantic.expectations is an OPTIONAL array (absent -> valid; non-array -> refused)
+# Γ£ô O-5: the Planner produces a deterministic Plan carrying the accepted semantic expectations (CD-1)
+# Γ£ô O-6: the Planner does NOT mutate the SemanticStore / inference session (zero coupling, CD-6)
+# Γ£ô O-7: the Planner does NOT open transactions (CD-6)
+# Γ£ô O-8: the Planner does NOT touch geometry/appearance/object stores (the one-substrate contract, CD-6)
+# Γ£ô O-9: round-trip T20 -> ingest -> accepted records -> PlanningContext.semantic -> createPlan -> expectedState.semantic.expectations (CD-1/CD-3)
+# Γ£ô O-10: two createPlan calls with identical inputs produce byte-identical plans (Invariant 17); the agenda participates in plan identity
+# Γ£ô O-11: refusal records do NOT enter expectedState.semantic.expectations ΓÇö even when the caller hands over the whole registry (CD-3)
+# Γ£ô O-12: backward compat ΓÇö the existing ai.test.mjs suite (131 tests) remains GREEN
+# Γ£ô P-1: metadata.semanticResults present when expected.semantic.expectations exists (total shape, agenda order, DD-5/DD-6)
+# Γ£ô P-2: SATISFIED case ΓÇö expected role === provided actual role (DD-1/DD-2)
+# Γ£ô P-3: VIOLATED case ΓÇö expected !== actual -> one category:'semantic' deviation (DD-4) + result DEVIATION
+# Γ£ô P-4: UNEVALUABLE case ΓÇö no role provider -> NO_ROLE_PROVIDER, listed in unevaluatedExpectations (DD-7); non-function provider refused (DD-8)
+# Γ£ô P-5: UNSUPPORTED case ΓÇö role outside T20's 7-role emission set, both sides (DD-2/DD-3); the provider is never trusted for it
+# Γ£ô P-6: INSUFFICIENT_EVIDENCE case ΓÇö provider returns null -> PROVIDER_RETURNED_NO_ROLE, no invented deviation (DD-2)
+# Γ£ô P-7: multi-expectation ΓÇö 3 expectations -> 3 semanticResults, agenda order preserved (DD-5)
+# Γ£ô P-8: no false verification ΓÇö an unmeasurable expectation can never become SATISFIED (┬º53 honesty)
+# Γ£ô P-9: determinism ΓÇö identical inputs -> identical semanticResults + deviation ids; provider invoked exactly once per expectation (DD-1)
+# Γ£ô P-10: backward compat ΓÇö evaluation-critic 120/120 + constraint-inference 107/107 (the 14 J-tests inside) remain GREEN
+# Γ£ô P-11: no semantic.js / semantic-inference.js import in evaluation.js (static scan); the 12-export surface gains nothing
+# Γ£ô P-12: evaluation.js does NOT mutate semantic state, the agenda, or any store (frozen fixtures survive evaluate byte-identically)
+# Γ£ô P-13: semanticResults deep-frozen and never aliased to the input agenda (the ┬º12 frozen-result contract)
+# Γ£ô P-14: role provider optional ΓÇö omission (and provider-without-agenda) preserves existing evaluate() behavior; the dormant blanket marker stays
+# Γ£ô Q-1: proposeCorrections accepts an EvaluationResult carrying semantic deviations; non-semantic rules keep working in the same pass (EE-1)
+# Γ£ô Q-2: a VIOLATED semantic deviation produces NO proposal (the ┬º28 decline, EE-1); the diagnostic signal rides the composed output (EE-2); the decline is routed EXPLICITLY (EE-3)
+# Γ£ô Q-3: SATISFIED semantic results produce NO deviation and NO proposal
+# Γ£ô Q-4: UNEVALUABLE / UNSUPPORTED / INSUFFICIENT_EVIDENCE produce NO deviation and NO proposal; the honest signal stays on the sidecar (EE-2)
+# Γ£ô Q-5: every emitted proposal uses the existing 7-key contract; none references a semantic deviationId (EE-1)
+# Γ£ô Q-6: no new exports in critic.js ΓÇö the 6-export C/D-era surface gains nothing (EE-7)
+# Γ£ô Q-7: critic.js does NOT mutate any store or the consumed result (frozen fixtures survive byte-identically, EE-5)
+# Γ£ô Q-8: critic.js does NOT open transactions (static scan + behavioral, EE-6)
+# Γ£ô Q-9: critic.js does NOT import correction.js or semantic.js (static scan, EE-7)
+# Γ£ô Q-10: determinism ΓÇö two proposeCorrections calls with identical inputs produce identical output (┬º29/┬º30)
+# Γ£ô Q-11: backward compat ΓÇö evaluation-critic 120/120 + constraint-inference 107/107 (the 14 J-tests + 14 K-tests inside) remain GREEN
+# Γ£ô Q-12: semantic diagnosis preserves evidence + provenance (source T20, evidence, confidence) where available; no invented confidence (EE-4/EE-5)
+# Γ£ô R-1: a semantic deviation reaches the Correction Loop through the existing boundary (the ┬º7 CorrectionTarget agenda over the REAL B->D chain)
+# Γ£ô R-2: the loop's capability resolution sees the SEMANTIC_ERROR root cause (CATEGORY_TO_ROOT_CAUSE; behavioral via the ledger)
+# Γ£ô R-3: capability resolution produces NO_CAPABILITY (per A-9: zero recipes for SEMANTIC_ERROR); the frozen resolution record, pinned verbatim
+# Γ£ô R-4: the loop terminates honestly ΓÇö TERMINATED / UNFIXABLE per the disclosure-39 mapping; the no-cycle rule keeps the session at IDLE (FD-4/FD-5)
+# Γ£ô R-5: no transaction is opened for a semantic deviation (no capability -> no attempt); every substrate counter stays at zero (FD-6)
+# Γ£ô R-6: history remains linear (Invariant 13) ΓÇö zero corrections, zero iterations, the state trail stays ['IDLE'], one fingerprint
+# Γ£ô R-7: no direct Store mutation (Invariant 8) ΓÇö the engine's ONLY document contact is the single critic consultation (read-delta = exactly one evaluate)
+# Γ£ô R-8: determinism ΓÇö two full pipelines produce identical outcomes (Invariant 19)
+# Γ£ô R-9: the honest diagnostic reaches the loop via the correct channel ΓÇö the D-1 sidecar record rides target.evidence verbatim; session-local frozen snapshot; ledger traceability (FD-2/FD-7)
+# Γ£ô R-10: the existing correction.test.mjs (144 tests) remains GREEN ΓÇö no regression from the 3.17 surface
+# Γ£ô R-11: backward compat ΓÇö the 1105 baseline components hold (constraint-inference 107, ai 131, evaluation-critic 120; counted 943 + gates in the final regression run)
+# Γ£ô R-12: the Correction Loop does NOT import semantic.js or semantic-inference.js (static scan: correction.js has ZERO static imports at all)
+# Γ£ô S-D-1: no filesystem access anywhere in the 3.17 surface (stripped bodies: no fs word, no require, no node: specifier; every static import relative; correction.js has ZERO imports)
+# Γ£ô S-D-2: no network access anywhere in the 3.17 surface (stripped bodies: no fetch / XMLHttpRequest / WebSocket / raw URL)
+# Γ£ô S-D-3: no LLM calls anywhere in the 3.17 surface (stripped bodies: no openai / anthropic / llm / completion / embedding / api_key vocabulary ΓÇö correction.js's comment-prose tokens strip to zero)
+# Γ£ô S-D-4: no direct Store mutation in the 3.17 surface ΓÇö the four PURE files carry no mutation-call form and no store/SceneGraph construction; the Correction leg is proven behaviorally (S-A-5/S-A-7: zero transactions, zero store deltas)
+# Γ£ô S-D-5: no direct History mutation in the 3.17 surface ΓÇö no HistoryManager vocabulary in the four PURE files; the engine's frozen rollback-pointer probe is read-only and was never reached (S-A-6: zero appends)
+# Γ£ô S-D-7: no new runtime dependencies ΓÇö package.json is byte-identical to HEAD; the 3.17 production files import only relative specifiers; the test file imports only relative modules and the three declared node: builtins
+# Γ£ô S-D-8: src/core is UNCHANGED ΓÇö zero git deltas over the frozen core tree; the frozen 3.17 boundary files (correction/constraints/transaction/tools/semantic) are equally untouched
+# Γ£ô H-1: src-js/semantic-inference.README.md exists and covers the 14 spec ┬º93-precedent topics (the DoD documentation pin, the 3.16 M-18 mirror)
+# Γ£ô S-A-1: the golden pipeline executes END-TO-END ΓÇö real T01 creation, real T20, real normalization, real planner carriage, real acceptance, real drift transaction, real evaluation, real critic, real frozen loop (┬º60)
+# Γ£ô S-A-2: each step produces the expected artifact ΓÇö proposal, record, expectation, satisfaction, deviation, no-proposal diagnosis, NO_CAPABILITY refusal, honest termination
+# Γ£ô S-A-4: honest termination ΓÇö NO_CAPABILITY resolved, TERMINATED/UNFIXABLE, the session stays IDLE, the verdict rides the ENGINE (SG-1)
+# Γ£ô S-A-5: zero transactions opened for the semantic deviation ΓÇö the correction leg never reaches the substrate (the live proof of the ┬º24 boundary)
+# Γ£ô S-A-6: history remains linear ΓÇö strictly appended, no loop entries, no session transitions (Invariant 13 over the golden)
+# Γ£ô S-A-7: all stores unchanged by the correction leg ΓÇö and unchanged by every non-mutating semantic leg (inference, normalization, planning, acceptance, evaluation)
+# Γ£ô S-B-1: drift -> attempted correction (capability resolution) -> no improvement -> termination/rollback per ┬º30 ΓÇö the live sequence over the golden
+# Γ£ô S-B-3: no oscillation ΓÇö the loop cannot oscillate over a NO_CAPABILITY target (zero iterations, zero attempts, the frozen policy forbids oscillation recovery)
+# Γ£ô S-B-4: the fingerprint trail is bounded ΓÇö one entry against the frozen policy budget; the ledgers are bounded too
+# Γ£ô S-C-1: P1 no direct mutation ΓÇö semantic inference/normalization/planning/acceptance/evaluation mutate NOTHING; the drift transaction is the timeline's only writer
+# Γ£ô S-C-3: P3 unsupported-role refusal ΓÇö an unsupported role cannot even ENTER the desired state, and cannot become verified even if hand-carried
+# Γ£ô S-C-4: P4 provenance preservation ΓÇö the provenance chain T20 proposal -> record -> sidecar -> loop evidence is verbatim end to end
+# Γ£ô S-C-5: P5 confidence preservation ΓÇö the provided confidence is never silently replaced (no rounding, no clamping, no threshold, no constant)
+# Γ£ô S-C-6: P6 evaluation honesty ΓÇö unevaluable semantic state can NEVER become satisfied (no provider -> UNEVALUABLE; null provider -> INSUFFICIENT_EVIDENCE; both invent nothing)
+# Γ£ô S-C-7: P7 correction verification ΓÇö nothing is accepted without post-mutation evaluation: the loop's ONLY world view is the critic's post-drift evaluation, and it executed nothing
+# Γ£ô S-C-8: P8 rollback safety ΓÇö the pre-attempt state persists untouched (zero attempts -> zero rollbacks needed); the frozen rollback policy exists but was never triggered
+# Γ£ô S-C-9: P9 linear history ΓÇö the golden's history is a strictly append-only sequence; the loop appended nothing (no History DAG, Invariant 13)
+# Γ£ô S-C-10: P10 planner purity ΓÇö planning over the golden records mutates NO canonical state; the context is deep-frozen; the plan carries the agenda
+# Γ£ô S-D-6: no nested transactions in the 3.17 surface ΓÇö no begin-call form in the four PURE files; every golden transaction is a root transaction (parentId null) and the loop opened none
+# Γ£ô S-B-2: this path IS the S-A path ΓÇö with zero semantic capability the ┬º30 second sequence always lands on the same honest terminus (structural identity across runs)
+# Γ£ô S-C-2: P2 deterministic normalization ΓÇö the SAME real T20 envelope normalizes byte-identically in independent sessions; two golden runs normalize identically (modulo substrate identity)
+# Γ£ô S-A-3: determinism ΓÇö two full golden runs produce byte-identical canonical outcome projections (the SG-6 identity-entropy projection, the 3.16 M-2 form)
+# Tests: 97 total, 97 passed, 0 failed
+# Subtest: tests\\semantic-inference.test.mjs
+ok 15 - tests\\semantic-inference.test.mjs
+  ---
+  duration_ms: 7531.0461
+  type: 'test'
+  ...
+# === Store ===
+# Γ£ô create semantic
+# Γ£ô get semantic
+# Γ£ô update semantic
+# Γ£ô delete semantic
+# Γ£ô has semantic
+# Γ£ô getAll
+# Γ£ô getByRole
+# Γ£ô getByTag
+# === Validation ===
+# Γ£ô invalid ObjectID
+# Γ£ô invalid confidence NaN
+# Γ£ô invalid confidence Infinity
+# Γ£ô confidence negative
+# Γ£ô confidence >1
+# Γ£ô invalid role
+# Γ£ô duplicate tags normalized
+# Γ£ô invalid relationship missing target
+# Γ£ô invalid relationship type
+# Γ£ô tag normalization
+# === Inference ===
+# Γ£ô rectangle inference
+# Γ£ô ellipse inference
+# Γ£ô path inference icon
+# Γ£ô text inference
+# Γ£ô unknown object insufficient evidence
+# Γ£ô deterministic repeated inference
+# Γ£ô large rectangle background candidate
+# === Proposal ===
+# Γ£ô proposal creation contains evidence
+# Γ£ô proposal does not mutate store
+# === Boundary ===
+# Γ£ô inferSemantic does not mutate ObjectStore
+# Γ£ô inferSemantic does not mutate GeometryStore
+# Γ£ô inferSemantic does not mutate SceneGraph
+# Γ£ô inferSemantic does not mutate SemanticStore
+# === Transaction ===
+# Γ£ô create semantic transaction
+# Γ£ô update semantic
+# Γ£ô delete semantic
+# Γ£ô undo redo semantic
+# Γ£ô rollback on validation failure
+# Γ£ô object existence validation
+# === Events ===
+# Γ£ô SemanticInferred does not imply persistence
+# Γ£ô mutation events after commit only
+# === Serialization ===
+# Γ£ô serialize deserialize deterministic
+# Γ£ô tags serialize deterministic
+# === Query API ===
+# Γ£ô findObjectsByRole
+# Γ£ô getSemanticConfidence
+# Γ£ô getRelationships
+# === Vertical Slice ===
+# Γ£ô vertical slice artboard large rect text small rect
+# === Immutability ===
+# Γ£ô snapshot before after inference identical
+# === Architecture ===
+# Γ£ô no direct store mutation from heuristics
+# Γ£ô no UI imports
+# Γ£ô proposal is read-only
+# Tests: 49 total, 49 passed, 0 failed
+# Subtest: tests\\semantic.test.mjs
+ok 16 - tests\\semantic.test.mjs
+  ---
+  duration_ms: 497.054
+  type: 'test'
+  ...
+# === SpatialIndex ===
+# Γ£ô Insert
+# Γ£ô Update
+# Γ£ô Delete
+# Γ£ô Query intersection
+# Γ£ô Query point
+# Γ£ô Tolerance
+# Γ£ô Multiple candidates
+# Γ£ô Deterministic result ordering
+# Γ£ô Rebuild
+# Γ£ô Empty index
+# Γ£ô Stale-index fallback
+# Γ£ô Transform causes index update
+# Γ£ô Reparent causes appropriate bbox/index update
+# Tests: 13 total, 13 passed, 0 failed
+# Subtest: tests\\spatial-index.test.mjs
+ok 17 - tests\\spatial-index.test.mjs
+  ---
+  duration_ms: 321.3341
+  type: 'test'
+  ...
+# === ObjectStore ===
+# Γ£ô create object
+# Γ£ô duplicate object id
+# Γ£ô object with missing geometry
+# Γ£ô object with parent field forbidden
+# Γ£ô object get returns clone
+# === GeometryStore ===
+# Γ£ô create geometry
+# Γ£ô duplicate geometry
+# Γ£ô geometry get clone
+# Γ£ô delete geometry in use
+# === AppearanceStore ===
+# Γ£ô create appearance
+# Γ£ô duplicate appearance
+# Γ£ô appearance with fill
+# Γ£ô appearance get clone
+# === Document ===
+# Γ£ô document create geometry
+# Γ£ô document create appearance
+# Γ£ô document create object
+# Γ£ô document delete geometry in use fails
+# === Mutation safety ===
+# Γ£ô object store no direct mutation
+# === Architecture ===
+# Γ£ô no UI imports (checked via file scan)
+# Tests: 19 total, 19 passed, 0 failed
+# Subtest: tests\\stores.test.mjs
+ok 18 - tests\\stores.test.mjs
+  ---
+  duration_ms: 285.7583
+  type: 'test'
+  ...
+# === Registry ===
+# Γ£ô register
+# Γ£ô duplicate ID rejection
+# Γ£ô unregister
+# Γ£ô get
+# Γ£ô has
+# Γ£ô list
+# Γ£ô category filtering
+# Γ£ô definitions frozen after registration
+# === Validation ===
+# Γ£ô invalid input rejected
+# Γ£ô unknown tool rejected
+# Γ£ô invalid ObjectID rejected
+# Γ£ô invalid numeric input rejected
+# Γ£ô transform singular rejected
+# === Read Tools ===
+# Γ£ô find_object_by_role no transaction
+# Γ£ô find_object_by_role no mutation
+# Γ£ô detect_shape_primitive no transaction
+# Γ£ô detect_symmetry no mutation
+# Γ£ô detect_shape_primitive distinguishes rect from polygon (anti-hardcode)
+# Γ£ô detect_shape_primitive delegates freeform paths to detectParametricShape (src-js/geometry.js:287)
+# Γ£ô detect_shape_primitive read-only: zero transactions, zero events, stores byte-identical
+# Γ£ô detect_symmetry symmetric vs asymmetric shapes (anti-hardcode, deviation varies)
+# Γ£ô detect_symmetry axis discrimination: isoceles triangle vertical-only, skipped axis reported null
+# Γ£ô detect_symmetry applies the WORLD transform (rotated square is not axis-symmetric)
+# Γ£ô detect_symmetry read-only: zero transactions, zero events, stores byte-identical
+# === Proposal Tools ===
+# Γ£ô infer_constraints proposals returned
+# Γ£ô infer_constraints ConstraintStore unchanged
+# Γ£ô infer_constraints no transaction
+# Γ£ô infer_semantic proposals returned
+# Γ£ô infer_semantic SemanticStore unchanged
+# Γ£ô infer_semantic no transaction
+# Γ£ô infer_constraints equal widths produce equalWidth proposal (anti-hardcode)
+# Γ£ô infer_constraints unequal widths -> NO equalWidth; same left edge -> align left
+# Γ£ô infer_constraints symmetry candidate reuses T18 analytical machinery (positive + negative)
+# Γ£ô infer_constraints read-only: ConstraintStore X-before==X-after, zero transactions, zero events
+# Γ£ô infer_semantic title-sized text object -> heading role (engine vocabulary, anti-hardcode)
+# Γ£ô infer_semantic small icon-sized object -> icon role
+# Γ£ô infer_semantic ambiguous object -> unknown role at low confidence
+# Γ£ô infer_semantic three inputs -> three distinct roles with ordered confidences
+# Γ£ô infer_semantic read-only: SemanticStore X-before==X-after, zero transactions, zero events
+# === Mutation Tools ===
+# Γ£ô create_rectangle Command created
+# Γ£ô create_ellipse real state change
+# Γ£ô create_ellipse workingCopy branch journals without touching canonical stores
+# Γ£ô create_path real state change
+# Γ£ô create_path workingCopy branch journals without touching canonical stores
+# Γ£ô delete_objects atomicity
+# Γ£ô delete_objects FAIL ENTIRE TRANSACTION no partial
+# Γ£ô delete_objects via substrate commits removal diff (reversible)
+# Γ£ô substrate events: exactly 1 TransactionCommitted on commit, 0 on rollback
+# Γ£ô move_object real state change (legacy)
+# Γ£ô move_object via substrate commits geometry modify with ids and exactly 1 TransactionCommitted
+# Γ£ô transform_objects exact matrix on rect (legacy)
+# Γ£ô transform_objects via substrate commits transformed params
+# Γ£ô apply_fill real appearance change, geometry untouched (legacy)
+# Γ£ô apply_fill via substrate commits appearance modify only
+# Γ£ô apply_fill replaces existing fill item instead of stacking
+# Γ£ô apply_fill opacity-only without existing fill fails honestly
+# Γ£ô align_objects WorldBBox left/top exact (legacy)
+# Γ£ô align_objects center and both-center exact (legacy)
+# Γ£ô align_objects via substrate commits aligned positions
+# Γ£ô distribute_objects centers exact spacing (legacy)
+# Γ£ô distribute_objects gaps exact spacing (legacy)
+# Γ£ô distribute_objects via substrate commits distributed positions
+# Γ£ô group_objects hierarchy only SceneGraph
+# Γ£ô group_objects SceneGraph owns hierarchy
+# Γ£ô ungroup_objects preserves child world transforms (legacy)
+# Γ£ô ungroup_objects via substrate preserves world transforms and commits
+# Γ£ô ungroup_objects rejects object nodes honestly
+# Γ£ô reorder_objects children order exact (legacy)
+# Γ£ô reorder_objects via substrate commits children reorder
+# Γ£ô boolean_operation union real geometry, originals removed (legacy)
+# Γ£ô boolean_operation difference and intersection exact bboxes (legacy)
+# Γ£ô boolean_operation keepOriginals true preserves originals (legacy)
+# Γ£ô boolean_operation via substrate commits and UNDO restores exact previous state
+# Γ£ô boolean_operation disjoint intersection fails GEOMETRY_DEGENERATE (legacy)
+# Γ£ô boolean_operation open path fails GEOMETRY_OPEN_PATH
+# Γ£ô outline_text PointText honest FONT_FALLBACK, zero state change
+# Γ£ô outline_text rejects non-text object with TOOL_PRECONDITION_FAILED
+# Γ£ô create_point_text
+# === Critical: AI Mutation Boundary ===
+# Γ£ô AI cannot directly mutate stores
+# === Critical: Proposal Non-Mutation ===
+# Γ£ô Before ConstraintStore = X After = X for infer_constraints
+# Γ£ô Before SemanticStore = X After = X for infer_semantic
+# === Critical: Group Ownership ===
+# Γ£ô group_objects SceneGraph owns hierarchy not GraphicObject
+# === Critical: Read Tool ===
+# Γ£ô detect_symmetry transaction count unchanged
+# === Vertical Tool Chain ===
+# Γ£ô create_rectangle -> move_object -> apply_fill -> align_objects -> find_object_by_role -> detect_symmetry
+# Tests: 84 total, 84 passed, 0 failed
+# Subtest: tests\\tools.test.mjs
+ok 19 - tests\\tools.test.mjs
+  ---
+  duration_ms: 508.9592
+  type: 'test'
+  ...
+# === Command Tests ===
+# Γ£ô create object
+# Γ£ô delete object
+# Γ£ô move object
+# Γ£ô transform object
+# Γ£ô update geometry
+# Γ£ô update appearance
+# Γ£ô create node
+# Γ£ô delete node
+# Γ£ô reparent node
+# Γ£ô set z order
+# === Transaction Tests ===
+# Γ£ô single command transaction
+# Γ£ô multi-command transaction
+# Γ£ô validation failure
+# Γ£ô command failure rollback
+# Γ£ô atomic commit
+# Γ£ô diff generation
+# Γ£ô journal normalization
+# === Working Copy Tests ===
+# Γ£ô canonical unchanged before commit
+# Γ£ô failed transaction leaves canonical unchanged
+# === Undo Tests ===
+# Γ£ô Create Undo
+# Γ£ô Move Undo
+# Γ£ô Delete Undo
+# === Redo Tests ===
+# Γ£ô Create Undo Redo
+# Γ£ô Move Undo Redo
+# === Branch Invalidation ===
+# Γ£ô Redo unavailable after new transaction
+# === Event Tests ===
+# Γ£ô No event before commit
+# Γ£ô Events after commit
+# Γ£ô TransactionCommitted after mutation events
+# Γ£ô Failed transaction produces no commit event
+# === Determinism Tests ===
+# Γ£ô Deterministic diff
+# === Vertical Slice ===
+# Γ£ô Create Artboard Create Rectangle Move Change Appearance Undo Undo Redo
+# === Numeric Example ===
+# Γ£ô Rectangle position 0,0 -> move 100,50 -> Undo -> Redo
+# Tests: 32 total, 32 passed, 0 failed
+# Subtest: tests\\transaction.test.mjs
+ok 20 - tests\\transaction.test.mjs
+  ---
+  duration_ms: 382.4398
+  type: 'test'
+  ...
+1..20
+# tests 20
+# suites 0
+# pass 20
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 8498.3596
