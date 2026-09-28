@@ -1,0 +1,60 @@
+✓ A-1: module exports — diagnoseSemanticDeviation and SEMANTIC_CORRECTION_CAPABILITIES exist (+ the SemanticCorrectionError surface)
+✓ A-2: capability registry shape — exactly ONE entry, id cap-shape-background, frozen, with the C8 preconditions encoding
+✓ A-3: happy path — shape->background with rect + area 20000 + childCount 0 -> CORRECTABLE + capabilityId
+✓ A-4: happy path reverse — background->shape with rect + area 200000 + childCount 0 -> CORRECTABLE
+✓ A-5: rect-gate violation — shape->background with ellipse -> UNSUPPORTED_TRANSITION / GEOMETRY_TYPE_NOT_ELIGIBLE
+✓ A-6: container-override violation — background->shape with rect + childCount 3 -> UNSUPPORTED_TRANSITION / CONTAINER_OVERRIDE_WOULD_INTERCEPT
+✓ A-7: role pair unsupported — text->heading -> UNSUPPORTED_TRANSITION / ROLE_PAIR_UNSUPPORTED
+✓ A-8: role pair unsupported — icon->shape -> UNSUPPORTED_TRANSITION / ROLE_PAIR_UNSUPPORTED
+✓ A-9: determinism — same input twice -> byte-identical diagnosis record (no RNG, no wall clock)
+✓ A-10: content-derived targetId — starts with sct-, exactly 8 lowercase hex chars after the prefix
+✓ A-11: no store mutation — the module imports nothing (zero-import static scan, no store module reference) and frozen inputs survive the call untouched
+✓ A-12: input validation — invalid deviation shape -> throws SemanticCorrectionError with code INVALID_DEVIATION and a deterministic message
+✓ A-13: input validation — invalid objectFacts -> throws SemanticCorrectionError with code INVALID_OBJECT_FACTS
+✓ A-14: architecture scan — no fs, no fetch, no eval, no Function, no process, no globalThis, no Date.now, no Math.random in the STRIPPED code body
+✓ A-15: frozen output — every returned diagnosis is deep-frozen (CORRECTABLE and every refusal arm)
+✓ A-16: golden scenario chain — dev-8305da82 + the C6 worked-example facts -> targetId sct-86f52be0 (Checkpoint C computed anchor)
+✓ B-1: buildSemanticCorrectionProposal returns a frozen proposal with exactly the C4 keys
+✓ B-2: id is 'scp-<8hex>' and matches the C6 golden value scp-f09b1135 for the golden input
+✓ B-3: mutation.kind === 'transform', toolId === 'T06', uniform-scale form (b===0, c===0, a===d)
+✓ B-4: mutation.input.objectIds === [target.objectId]
+✓ B-5: expectedSemanticEffect.role.from === 'shape', .toward === 'background', predictedWorldArea strictly beyond threshold
+✓ B-6: predictedWorldArea > areaGrowThreshold with margin 0.05 (grow)
+✓ B-7: shrink direction — predictedWorldArea < areaShrinkThreshold with margin (background -> shape)
+✓ B-8: confidence copied from target, never synthesized
+✓ B-9: provenance.source === 'semantic-correction', deviationId matches target.source (+ the smr- host-path mirror)
+✓ B-10: strict-crossing refusal — a handed proposal whose prediction lands inside the threshold is refused with PREDICTED_AREA_INSIDE_THRESHOLD
+✓ B-11: non-uniform matrix refusal — a foreign descriptor with b!=0/c!=0/a!=d is refused with NON_UNIFORM_SCALE_REJECTED (T06 validator alone would accept it)
+✓ B-12: determinism — same input twice -> byte-identical proposal
+✓ C-1: executeSemanticCorrectionAttempt opens EXACTLY ONE transaction
+✓ C-2: transaction id starts with 'atx-' and is content-derived
+✓ C-3: T06 is fetched from the substrate registry (spy on registry.get)
+✓ C-4: store mutation is committed (real geometry change verified via the read surface)
+✓ C-5: on registry miss (T06 unregistered) -> FAILED with TOOLS_UNAVAILABLE; stores untouched
+✓ C-6: on tool validation failure -> FAILED; stores untouched (atomic)
+✓ C-7: inverseKind === 'snapshot' (T06 has no command inverse)
+✓ C-8: history grows by exactly 1 (linear, invariant 13)
+✓ C-9: TransactionCommitted fires AFTER commit (event order, invariant 16)
+✓ C-10: determinism — same proposal + fresh substrate -> byte-identical result record (transactionId included)
+✓ D-1: full chain — real document -> real T20 -> diagnose CORRECTABLE -> proposal -> execute -> commit -> real T20 re-derivation flips role to 'background'
+✓ D-2: post-mutation verification — the re-derived role after commit matches the proposal expected role.toward
+✓ D-3: rollback works — the snapshot inverse undo restores the stores
+✓ D-4: golden chain reproduces the C6 values end-to-end — dev-8305da82 -> sct-86f52be0 -> scp-f09b1135, post-area === 105000
+✓ E-1: verifySemanticCorrectionAttempt returns a frozen VerificationResult with exactly the declared keys
+✓ E-2: golden chain SATISFIED — after executing scp-f09b1135 with the golden substrate, verification returns SATISFIED, actualRole 'background'
+✓ E-3: VIOLATED — an EXECUTED attempt verified against a document where the object was never mutated returns VIOLATED, reason ROLE_MISMATCH
+✓ E-4: UNVERIFIABLE / T20_UNAVAILABLE — a substrate whose registry lacks T20 returns UNVERIFIABLE with reason T20_UNAVAILABLE
+✓ E-5: UNVERIFIABLE / T20_NO_PROPOSAL — T20 refuses for a missing object; T20_REFUSED — the normalizer's contract refuses a malformed / out-of-vocabulary proposal
+✓ E-6: FAILED attempt cannot verify — INVALID_ATTEMPT (and any non-EXECUTED attempt shape)
+✓ E-7: confidence and evidence copied verbatim from the normalized record — never synthesized (value AND null arms)
+✓ E-8: actualRole is ALWAYS read from post-commit state — a document mutation between execute and verify flips the verification (no snapshot)
+✓ E-9: no false verification — a target with an unreachable role never becomes SATISFIED
+✓ E-10: determinism — same state + same target + same substrate -> byte-identical VerificationResult
+✓ E-11: architecture scan — the verification/provider region: no role-write surface, no direct store writes, T20 reached only through the injected registry.get
+✓ E-12: provider shape — createSemanticRoleProvider returns a function; the correct role for a known object; null when T20 unavailable
+✓ F-1: the provider injected as evaluationContext.getActualRole drives the semantic arm to SATISFIED against a real document
+✓ F-2: the provider returns null on an unknown object (T20 refuses) — the honest signal, not a fabricated role
+✓ F-3: the provider re-runs T20 on EVERY call — mutating the document between calls changes the returned role (no caching)
+✓ F-4: the provider matches the DD-1 contract exactly: (objectId) => role string | null, never throws
+
+Tests: 58 total, 58 passed, 0 failed

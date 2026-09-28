@@ -1,0 +1,24 @@
+scan 'setSemanticRole' -> 0 hit(s)
+scan 'setSemantic' -> 0 hit(s)
+scan 'forceRole' -> 0 hit(s)
+scan 'overrideRole' -> 0 hit(s)
+scan 'semanticStore.write' -> 0 hit(s)
+scan 'semanticStore.set' -> 0 hit(s)
+scan 'fetch' -> 0 hit(s)
+scan 'axios' -> 0 hit(s)
+scan 'http' -> 0 hit(s)
+scan 'https' -> 0 hit(s)
+scan 'fs\.' -> 0 hit(s)
+scan 'writeFile' -> 0 hit(s)
+scan 'LLM' -> 0 hit(s)
+scan 'OpenAI' -> 0 hit(s)
+scan 'Anthropic' -> 0 hit(s)
+---
+import/require surface:
+  none (zero-import module)
+---
+from-specifier scan:
+  NONE (rg exit 1 — zero imports)
+---
+npm-specifier scan (bare specifiers):
+  NONE (rg exit 1)

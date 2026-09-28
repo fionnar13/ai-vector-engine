@@ -1,0 +1,18 @@
+✓ A-1: module exports — diagnoseSemanticDeviation and SEMANTIC_CORRECTION_CAPABILITIES exist (+ the SemanticCorrectionError surface)
+✓ A-2: capability registry shape — exactly ONE entry, id cap-shape-background, frozen, with the C8 preconditions encoding
+✓ A-3: happy path — shape->background with rect + area 20000 + childCount 0 -> CORRECTABLE + capabilityId
+✓ A-4: happy path reverse — background->shape with rect + area 200000 + childCount 0 -> CORRECTABLE
+✓ A-5: rect-gate violation — shape->background with ellipse -> UNSUPPORTED_TRANSITION / GEOMETRY_TYPE_NOT_ELIGIBLE
+✓ A-6: container-override violation — background->shape with rect + childCount 3 -> UNSUPPORTED_TRANSITION / CONTAINER_OVERRIDE_WOULD_INTERCEPT
+✓ A-7: role pair unsupported — text->heading -> UNSUPPORTED_TRANSITION / ROLE_PAIR_UNSUPPORTED
+✓ A-8: role pair unsupported — icon->shape -> UNSUPPORTED_TRANSITION / ROLE_PAIR_UNSUPPORTED
+✓ A-9: determinism — same input twice -> byte-identical diagnosis record (no RNG, no wall clock)
+✓ A-10: content-derived targetId — starts with sct-, exactly 8 lowercase hex chars after the prefix
+✓ A-11: no store mutation — the module imports nothing (zero-import static scan, no store module reference) and frozen inputs survive the call untouched
+✓ A-12: input validation — invalid deviation shape -> throws SemanticCorrectionError with code INVALID_DEVIATION and a deterministic message
+✓ A-13: input validation — invalid objectFacts -> throws SemanticCorrectionError with code INVALID_OBJECT_FACTS
+✓ A-14: architecture scan — no fs, no fetch, no eval, no Function, no process, no globalThis, no Date.now, no Math.random in the STRIPPED code body
+✓ A-15: frozen output — every returned diagnosis is deep-frozen (CORRECTABLE and every refusal arm)
+✓ A-16: golden scenario chain — dev-8305da82 + the C6 worked-example facts -> targetId sct-86f52be0 (Checkpoint C computed anchor)
+
+Tests: 16 total, 16 passed, 0 failed

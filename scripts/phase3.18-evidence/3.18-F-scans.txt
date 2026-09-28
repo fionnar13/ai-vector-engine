@@ -1,0 +1,43 @@
+== §69 scans over src-js/semantic-correction.js (whole file, comments included — the raw-token posture) ==
+SCAN OK   (0 hits): role-write surface: setSemanticRole — src-js/semantic-correction.js
+SCAN OK   (0 hits): role-write surface: setSemantic — src-js/semantic-correction.js
+SCAN OK   (0 hits): role-write surface: forceRole — src-js/semantic-correction.js
+SCAN OK   (0 hits): role-write surface: overrideRole — src-js/semantic-correction.js
+SCAN OK   (0 hits): semantic store write: semanticStore — src-js/semantic-correction.js
+SCAN OK   (0 hits): network: fetch/axios/http/https — src-js/semantic-correction.js
+SCAN OK   (0 hits): filesystem: fs./writeFile — src-js/semantic-correction.js
+SCAN OK   (0 hits): LLM: LLM/OpenAI/Anthropic — src-js/semantic-correction.js
+SCAN OK   (0 hits): npm imports: require( — src-js/semantic-correction.js
+SCAN OK   (0 hits): npm imports: import declaration — src-js/semantic-correction.js
+SCAN OK   (0 hits): npm imports: dynamic import() — src-js/semantic-correction.js
+== §69 scans over src-js/semantic-correction.js (STRIPPED code body — the A-14 posture) ==
+SCAN OK   (0 hits): banned: \bfs\b (stripped body)
+SCAN OK   (0 hits): banned: \bfetch\b (stripped body)
+SCAN OK   (0 hits): banned: \beval\b (stripped body)
+SCAN OK   (0 hits): banned: \bFunction\b (stripped body)
+SCAN OK   (0 hits): banned: \bprocess\b (stripped body)
+SCAN OK   (0 hits): banned: \bglobalThis\b (stripped body)
+SCAN OK   (0 hits): banned: Date.now (stripped body)
+SCAN OK   (0 hits): banned: Math.random (stripped body)
+== Checkpoint F additional scans ==
+SCAN OK   (0 hits): F: no RNG (Math.random) (stripped body)
+SCAN OK   (0 hits): F: direct store writes .set( (stripped body)
+SCAN OK   (0 hits): F: direct store writes .update( (stripped body)
+SCAN OK   (0 hits): F: direct store writes .create( (stripped body)
+SCAN OK   (0 hits): F: direct store writes .delete( (stripped body)
+(F region starts at line 1171)
+SCAN OK   (0 hits): F region: no role-write tokens (F region, stripped)
+SCAN OK   (0 hits): F region: no store-write names (F region, stripped)
+SCAN OK   (0 hits): F region: no direct store writes (F region, stripped)
+== export surface ==
+384:export class SemanticCorrectionError extends Error {
+402:export const SEMANTIC_CORRECTION_CAPABILITIES = deepFreeze([
+497:export function diagnoseSemanticDeviation(deviation, objectFacts){
+756:export function buildSemanticCorrectionProposal(target, capability, objectFacts){
+953:export function executeSemanticCorrectionAttempt(proposal, substrate){
+1322:export function verifySemanticCorrectionAttempt(attempt, proposal, target, substrate){
+1379:export function createSemanticRoleProvider(substrate){
+== line count ==
+1387 src-js/semantic-correction.js
+SCAN OK   (present): F region reaches T20 only via registry.get/registry.has
+ALL §69 SCANS ZERO-HIT
