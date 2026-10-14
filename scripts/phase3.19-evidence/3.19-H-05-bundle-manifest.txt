@@ -1,0 +1,131 @@
+=== phase3.19-delta.zip FINAL manifest (2026-09-28T23:35:34Z) ===
+archive: /home/z/my-project/download/phase3.19-delta.zip
+-rw-rw-r-- 1 z z 507354 Sep 28 23:35 /home/z/my-project/download/phase3.19-delta.zip
+
+=== unzip -l (full listing) ===
+Archive:  /home/z/my-project/download/phase3.19-delta.zip
+  Length      Date    Time    Name
+---------  ---------- -----   ----
+    74377  2026-09-28 18:42   src-js/tools.js
+    39889  2026-09-28 18:42   src-js/dsl.js
+    37813  2026-09-28 19:17   src-js/transaction.js
+    73073  2026-09-28 19:17   src-js/evaluation.js
+    31835  2026-09-28 19:20   src-js/critic.js
+   201398  2026-09-28 19:21   src-js/correction.js
+     2435  2026-09-28 18:14   scripts/run-suite.sh
+   122220  2026-09-28 19:33   tests/constraint-inference.test.mjs
+   295068  2026-09-28 19:33   tests/correction.test.mjs
+   163064  2026-09-28 18:42   tests/semantic-inference.test.mjs
+    60798  2026-09-28 20:57   tests/phase3.19.test.mjs
+        0  2026-09-28 23:35   scripts/phase3.19-evidence/
+       39  2026-09-28 19:33   scripts/phase3.19-evidence/3.19-D1-constraint.txt
+     3910  2026-09-28 22:26   scripts/phase3.19-evidence/3.19-G-02-phase319.txt
+     2056  2026-09-28 23:30   scripts/phase3.19-evidence/3.19-H-01-run-suite.txt
+     1971  2026-09-28 15:54   scripts/phase3.19-evidence/3.19-A-baseline.txt
+       40  2026-09-28 20:45   scripts/phase3.19-evidence/3.19-E-10-correction.txt
+     4787  2026-09-28 19:21   scripts/phase3.19-evidence/3.19-D-green-part3.txt
+      421  2026-09-28 20:44   scripts/phase3.19-evidence/3.19-E-08-registration.txt
+      197  2026-09-28 18:42   scripts/phase3.19-evidence/3.19-C1-green-sd8.txt
+    11747  2026-09-28 18:45   scripts/phase3.19-evidence/3.19-C1-MICRO-FIXES-REPORT.md
+    46660  2026-09-28 20:42   scripts/phase3.19-evidence/3.19-E-pre-phase319-copy.mjs
+     3635  2026-09-28 19:23   scripts/phase3.19-evidence/3.19-D-green.txt
+      364  2026-09-28 20:36   scripts/phase3.19-evidence/3.19-E-01-g2-syntaxerror.txt
+      191  2026-09-28 20:45   scripts/phase3.19-evidence/3.19-E-09-architecture.txt
+       37  2026-09-28 19:34   scripts/phase3.19-evidence/3.19-D1-tools.txt
+     9902  2026-09-28 20:47   scripts/phase3.19-evidence/3.19-E-P2-FIXES-REPORT.md
+      896  2026-09-28 20:58   scripts/phase3.19-evidence/3.19-E1-06-final-state.txt
+       38  2026-09-28 18:43   scripts/phase3.19-evidence/3.19-C1-tools.txt
+     5608  2026-09-28 23:30   scripts/phase3.19-evidence/3.19-H-03-evidence-dir.txt
+      371  2026-09-28 21:26   scripts/phase3.19-evidence/3.19-F-09-architecture-304-gate.txt
+      386  2026-09-28 22:27   scripts/phase3.19-evidence/3.19-G-03-gates.txt
+       39  2026-09-28 19:21   scripts/phase3.19-evidence/3.19-D-g18-correction.txt
+    57038  2026-09-28 20:56   scripts/phase3.19-evidence/3.19-E1-pre-phase319-copy.mjs
+       38  2026-09-28 18:43   scripts/phase3.19-evidence/3.19-C1-dsl.txt
+     2056  2026-09-28 22:26   scripts/phase3.19-evidence/3.19-G-01-run-suite.txt
+     2092  2026-09-28 20:58   scripts/phase3.19-evidence/3.19-E1-05-run-suite.txt
+    25245  2026-09-28 21:31   scripts/phase3.19-evidence/3.19-F-INTEGRATION-REPORT.md
+      352  2026-09-28 21:26   scripts/phase3.19-evidence/3.19-F-06-spatial-index.txt
+      812  2026-09-28 18:14   scripts/phase3.19-evidence/3.19-C-green.txt
+      132  2026-09-28 20:44   scripts/phase3.19-evidence/3.19-E-07-g12-byte-identity.txt
+       37  2026-09-28 19:25   scripts/phase3.19-evidence/3.19-D-tools.txt
+    32414  2026-09-28 23:35   scripts/phase3.19-evidence/3.19-H-BUILD-REPORT.md
+       39  2026-09-28 20:58   scripts/phase3.19-evidence/3.19-E1-04-correction.txt
+       37  2026-09-28 19:34   scripts/phase3.19-evidence/3.19-D1-dsl.txt
+    12953  2026-09-28 21:26   scripts/phase3.19-evidence/3.19-F-07-semantic-inference.txt
+    18652  2026-09-28 21:26   scripts/phase3.19-evidence/3.19-F-05-constraint-inference.txt
+      540  2026-09-28 20:58   scripts/phase3.19-evidence/3.19-E1-01-diff-scoped.txt
+     6770  2026-09-28 20:59   scripts/phase3.19-evidence/3.19-E1-SANCTION-PIN-REPORT.md
+       39  2026-09-28 19:33   scripts/phase3.19-evidence/3.19-D1-g4.txt
+     1975  2026-09-28 18:42   scripts/phase3.19-evidence/3.19-C1-green.txt
+     2054  2026-09-28 18:43   scripts/phase3.19-evidence/3.19-C1-suite.txt
+     2062  2026-09-28 19:26   scripts/phase3.19-evidence/3.19-D-suite.txt
+       39  2026-09-28 19:17   scripts/phase3.19-evidence/3.19-D-g19-constraint.txt
+    46539  2026-09-28 20:58   scripts/phase3.19-evidence/3.19-E1-tmp-head-cur.txt
+      354  2026-09-28 18:44   scripts/phase3.19-evidence/3.19-C1-byte-identity.txt
+       37  2026-09-28 19:34   scripts/phase3.19-evidence/3.19-D1-transaction.txt
+     1257  2026-09-28 20:56   scripts/phase3.19-evidence/3.19-E1-00-preflight.txt
+    47595  2026-09-28 17:52   scripts/phase3.19-evidence/3.19-B-TRIAGE-REPORT.md
+     4889  2026-09-28 18:41   scripts/phase3.19-evidence/3.19-C1-red.txt
+     2715  2026-09-28 21:27   scripts/phase3.19-evidence/3.19-F-11-invariant-scans.txt
+     1193  2026-09-28 19:21   scripts/phase3.19-evidence/3.19-D-g18-constraint.txt
+    25532  2026-09-28 21:26   scripts/phase3.19-evidence/3.19-F-04-correction.txt
+      148  2026-09-28 20:58   scripts/phase3.19-evidence/3.19-E1-03-interaction-arch.txt
+     3910  2026-09-28 23:30   scripts/phase3.19-evidence/3.19-H-02-phase319.txt
+     6497  2026-09-28 19:17   scripts/phase3.19-evidence/3.19-D-green-part2.txt
+     4787  2026-09-28 20:44   scripts/phase3.19-evidence/3.19-E-06-g12-red.txt
+    10876  2026-09-28 21:26   scripts/phase3.19-evidence/3.19-F-02-semantic-correction.txt
+    29683  2026-09-28 22:34   scripts/phase3.19-evidence/3.19-G-FINAL-REGRESSION-REPORT.md
+       39  2026-09-28 19:34   scripts/phase3.19-evidence/3.19-D1-evalcritic.txt
+     9119  2026-09-28 19:15   scripts/phase3.19-evidence/3.19-D-red.txt
+      727  2026-09-28 20:46   scripts/phase3.19-evidence/3.19-E-12-final-state.txt
+     3964  2026-09-28 20:58   scripts/phase3.19-evidence/3.19-E1-02-phase319-green.txt
+       37  2026-09-28 19:25   scripts/phase3.19-evidence/3.19-D-seminf.txt
+    46539  2026-09-28 20:58   scripts/phase3.19-evidence/3.19-E1-tmp-head-pre.txt
+    18104  2026-09-28 18:18   scripts/phase3.19-evidence/3.19-C-P0-FIXES-REPORT.md
+     1256  2026-09-28 20:39   scripts/phase3.19-evidence/3.19-E-05-g12-prescan.txt
+       37  2026-09-28 19:25   scripts/phase3.19-evidence/3.19-D-dsl.txt
+      518  2026-09-28 19:34   scripts/phase3.19-evidence/3.19-D1-suite.txt
+       39  2026-09-28 19:17   scripts/phase3.19-evidence/3.19-D-g19-evalcritic.txt
+     1170  2026-09-28 21:26   scripts/phase3.19-evidence/3.19-F-03-transaction.txt
+      603  2026-09-28 19:23   scripts/phase3.19-evidence/3.19-D-g17-correction.txt
+     1187  2026-09-28 23:30   scripts/phase3.19-evidence/3.19-H-04-final-tree.txt
+       37  2026-09-28 19:34   scripts/phase3.19-evidence/3.19-D1-p319.txt
+       37  2026-09-28 19:17   scripts/phase3.19-evidence/3.19-D-g6-transaction.txt
+     2068  2026-09-28 21:27   scripts/phase3.19-evidence/3.19-F-10-run-suite.txt
+     1021  2026-09-28 21:26   scripts/phase3.19-evidence/3.19-F-08-architecture-gate.txt
+    36650  2026-09-28 16:05   scripts/phase3.19-evidence/3.19-A-RECON-REPORT.md
+      349  2026-09-28 20:37   scripts/phase3.19-evidence/3.19-E-03-g2-postdelete-status.txt
+     3572  2026-09-28 18:13   scripts/phase3.19-evidence/3.19-C-red.txt
+     7479  2026-09-28 19:17   scripts/phase3.19-evidence/3.19-D-green-part1.txt
+      277  2026-09-28 19:17   scripts/phase3.19-evidence/3.19-D-g6-c18.txt
+     6945  2026-09-28 19:35   scripts/phase3.19-evidence/3.19-D1-REPIN-REPORT.md
+     2064  2026-09-28 18:40   scripts/phase3.19-evidence/3.19-C1-red-sd8.txt
+      324  2026-09-28 20:37   scripts/phase3.19-evidence/3.19-E-04-g2-interaction-postdelete.txt
+     2056  2026-09-28 18:14   scripts/phase3.19-evidence/3.19-C-suite.txt
+     8989  2026-09-28 23:35   scripts/phase3.19-evidence/3.19-H-05-bundle-manifest.txt
+     3781  2026-09-28 20:36   scripts/phase3.19-evidence/3.19-E-02-g2-unregistered-unreferenced.txt
+       37  2026-09-28 19:34   scripts/phase3.19-evidence/3.19-D1-seminf.txt
+     9193  2026-09-28 22:30   scripts/phase3.19-evidence/3.19-G-04-deps-frozen-delta.txt
+     4067  2026-09-28 18:42   scripts/phase3.19-evidence/3.19-C1-green-part2.txt
+     3922  2026-09-28 21:26   scripts/phase3.19-evidence/3.19-F-01-phase319.txt
+      317  2026-09-28 20:36   scripts/phase3.19-evidence/3.19-E-00-git-status.txt
+     4495  2026-09-28 20:39   scripts/phase3.19-evidence/probe-3.19-E-g12-prescan.mjs
+     2159  2026-09-28 20:46   scripts/phase3.19-evidence/3.19-E-11-run-suite.txt
+    20496  2026-09-28 19:27   scripts/phase3.19-evidence/3.19-D-P1-FIXES-REPORT.md
+---------                     -------
+  1750327                     106 files
+
+=== zip sha256 ===
+312d6fc0672e38bb34c7a5852cb0d567f130db6d64e9eef1981ffb9fec32af86  /home/z/my-project/download/phase3.19-delta.zip
+
+=== interaction.test_1 stored in archive (expect none) ===
+(none)
+
+=== archived H report vs disk (cmp) ===
+IDENTICAL
+
+=== archived phase3.19.test.mjs == disk (cmp) ===
+IDENTICAL
+
+=== repo state after bundle (porcelain count must remain 13) ===
+13

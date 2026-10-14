@@ -463,12 +463,21 @@ export function evaluateAndCritique(expectedState, documentContext, evaluationCo
 //     operation:'translate', params:{x,y}} with delta = expected - actual
 //     on the pinned axis and 0 on the other — T05 move_object, DELTA
 //     semantics, no side effects on any other axis.
-//   size-class (equalWidth/equalHeight -> 'size.width'/'size.height') and
-//     distance-class (fixedDistance) violations -> NO proposal. The only
-//     size capability is T06, whose affine transform is origin-anchored:
-//     scaling the width MOVES the object (a position side effect that can
-//     violate OTHER accepted constraints). No SAFE capability exists, so
-//     per §28 nothing is proposed — surfaced, never patched.
+//   size-class violations (equalWidth/equalHeight -> 'size.width'/'size.height')
+//     -> {type:'transform', targets:[violated], operation:'scale',
+//     params:{sx,sy}} with the axis factor = expected/actual (the reference
+//     quantity over the violating participant's quantity) and 1 on the
+//     untouched axis — G-18 (PHASE 3.19): the scale-to-target-size recipe
+//     (correction.js SIZE_ERROR -> TransformObject/T06) is the sanctioned
+//     path into T06, on the G-19 worst-offender policy (the deviation already
+//     names the max-error participant). The 3.16 posture ("no SAFE capability
+//     exists — nothing is proposed") is SUPERSEDED by the B-approved ruling:
+//     the T06 origin-anchored scale's position side effect is a known,
+//     disclosed MEDIUM-risk trade-off (recipe risk MEDIUM, reversible), not a
+//     reason to leave the class unfixable.
+//   distance-class (fixedDistance) violations -> NO proposal. No capability
+//     carries the center-distance class, so per §28 nothing is proposed —
+//     surfaced, never patched.
 //
 // ROUTING: a deviation is a CONSTRAINT violation when the evaluation
 // record's metadata.constraintDeviations carries its provenance (by
@@ -480,7 +489,7 @@ export function evaluateAndCritique(expectedState, documentContext, evaluationCo
 // discipline — the pass adds no entropy and no new contract.
 // ============================================================================
 
-const CONSTRAINT_CORRECTABLE_PROPERTIES = deepFreeze(['position.x', 'position.y']);
+const CONSTRAINT_CORRECTABLE_PROPERTIES = deepFreeze(['position.x', 'position.y', 'size.width', 'size.height']);
 
 // The constraint provenance for a deviation, or null when the deviation is
 // not a constraint violation.
@@ -500,14 +509,30 @@ function constraintProposalFor(d, result){
   const expected = d.expected;
   const actual = d.actual;
   if (!isFiniteNumber(expected) || !isFiniteNumber(actual)) return null;
-  const dx = property === 'position.x' ? expected - actual : 0;
-  const dy = property === 'position.y' ? expected - actual : 0;
-  if (dx === 0 && dy === 0) return null;
   const target = isNonEmptyString(d.objectId) ? d.objectId
     : (isNonEmptyString(provenance.violatedObjectId) ? provenance.violatedObjectId : null);
   if (target === null) return null;
   const type = isNonEmptyString(provenance.type) ? provenance.type : 'constraint';
   const constraintId = isNonEmptyString(provenance.constraintId) ? provenance.constraintId : '';
+  if (property === 'size.width' || property === 'size.height'){
+    // G-18 (PHASE 3.19): size-class arm — the scale intent targets the
+    // WORST-offender participant (the deviation's objectId under the ratified
+    // G-19 policy) and scales the violated axis by expected/actual (the
+    // reference's quantity over the offender's quantity); the untouched axis
+    // carries factor 1. Honest declines: a non-positive quantity (a zero or
+    // negative size would fabricate a mirror/collapse) or a degenerate
+    // ~zero actual (division blowup).
+    if (expected <= 0 || Math.abs(actual) < 1e-12) return null;
+    const sx = property === 'size.width' ? expected / actual : 1;
+    const sy = property === 'size.height' ? expected / actual : 1;
+    return {
+      intent: { type: 'transform', targets: [target], operation: 'scale', params: { sx, sy } },
+      reason: `scale '${target}' by (${sx},${sy}) to satisfy the accepted ${type} constraint '${constraintId}'`
+    };
+  }
+  const dx = property === 'position.x' ? expected - actual : 0;
+  const dy = property === 'position.y' ? expected - actual : 0;
+  if (dx === 0 && dy === 0) return null;
   return {
     intent: { type: 'transform', targets: [target], operation: 'translate', params: { x: dx, y: dy } },
     reason: `translate '${target}' by (${dx},${dy}) to satisfy the accepted ${type} constraint '${constraintId}'`

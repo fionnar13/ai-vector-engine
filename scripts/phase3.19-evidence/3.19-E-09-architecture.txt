@@ -1,0 +1,6 @@
+=== architecture gate (untouched by G-12) ===
+✓ Geometry has no UI/Renderer/SceneGraph/AI/FS dependencies
+✓ No circular dependency (Math -> Geometry only)
+
+Architecture tests PASS
+exit=0

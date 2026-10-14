@@ -1,0 +1,5 @@
+=== interaction (G-2 harmlessness preserved) ===
+Tests: 55 total, 55 passed, 0 failed
+=== architecture gate ===
+Architecture tests PASS
+arch exit=0

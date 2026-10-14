@@ -1,0 +1,15 @@
+tests/geometry.test.js RC=0
+
+Tests: 37 total, 37 passed, 0 failed
+tests/architecture.test.mjs RC=0
+
+Architecture tests PASS
+tests/architecture-phase3.04.mjs RC=0
+✓ src/core/scenegraph/spatialIndex.ts architecture OK
+Architecture checks PASS for Phase 3.04
+tests/run-js.js RC=0
+
+Tests: 22 total, 22 passed, 0 failed
+src-js/run.js RC=0
+✓ bbox union
+Tests: 4 total, 4 passed, 0 failed

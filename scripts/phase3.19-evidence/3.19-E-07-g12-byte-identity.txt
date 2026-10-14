@@ -1,0 +1,5 @@
+=== pure-insertion proof: diff pre-E copy vs current (removed lines count) ===
+0
+(0 = pure insertion)
+=== added lines count ===
+178

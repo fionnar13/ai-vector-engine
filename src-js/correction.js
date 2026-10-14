@@ -1738,6 +1738,27 @@ function deriveForTool(toolId, target, input){
     const delta = axis === 'x' ? { x: target.targetValue - target.observedValue, y: 0 } : { x: 0, y: target.targetValue - target.observedValue };
     values.delta = delta;
     keys.push('delta');
+  } else if (toolId === 'T06'){
+    // G-18 (PHASE 3.19): size-class derivation — the scale-to-target-size
+    // recipe's deterministic input rule (the recipe IS the sanctioned path
+    // into T06 for size-class constraint corrections). A 'size.width' /
+    // 'size.height' metric with finite observed/target evidence yields the
+    // axis scale factor targetValue/observedValue as an axis-aligned
+    // Matrix3x3 (the untouched axis carries 1); the T06 origin-anchored
+    // scale's position side effect is the disclosed MEDIUM-risk trade-off.
+    // Honest declines: other metrics stay rule-less (disclosure 19 is
+    // unchanged for them), non-finite evidence, a ~zero observed value
+    // (division blowup), or a non-positive factor (a mirror/collapse is
+    // never fabricated).
+    if (target.metric !== 'size.width' && target.metric !== 'size.height') return null;
+    if (!isFiniteNumber(target.observedValue) || !isFiniteNumber(target.targetValue)) return null;
+    if (Math.abs(target.observedValue) < 1e-12) return null;
+    const f = target.targetValue / target.observedValue;
+    if (!isFiniteNumber(f) || f <= 0) return null;
+    values.transform = target.metric === 'size.width'
+      ? { a: f, b: 0, c: 0, d: 1, tx: 0, ty: 0 }
+      : { a: 1, b: 0, c: 0, d: f, tx: 0, ty: 0 };
+    keys.push('transform');
   } else if (toolId === 'T07'){
     if (!isOpacityMetric(target.metric) || !isFiniteNumber(target.targetValue) || target.targetValue < 0 || target.targetValue > 1) return null;
     values.opacity = target.targetValue;
@@ -2414,15 +2435,57 @@ function substrateWorkingCopyView(wc){
 // One LIVE tool behind ONE Command (disclosure 26). The §32 inverse is
 // declared ONLY where tool semantics are exactly invertible (T05 translation
 // negation); everything else falls back to the executor's snapshot path.
+// G-17 (PHASE 3.19): T11 input translation — the dissolve-group recipe's
+// target set carries OBJECT ids (the §40 scope, seeded by
+// resolveCorrectionDiagnosis:1409), but T11's validator demands GROUP NODE ids
+// (tools.js:546 rejects object nodes outright), so every object-id
+// dissolve-group attempt failed deterministically. This resolver walks
+// findNodeByObjectId -> parent chain and returns the owning group node id, or
+// null (honest decline) when the object is unattached, top-level, has a
+// missing/object-node parent — or when the parent is the scene ROOT
+// placeholder (NOT a group: dissolving it would destroy the scene root).
+// SceneGraph marks neither groups nor its root (createRoot and a root-level
+// createGroup produce structurally identical objectRef-null nodes), so the
+// root placeholder is identified by the house construction discipline: the
+// root is ALWAYS the first-inserted node (every fixture and the T01 fallback
+// create it before anything else, tools.js:244, scenegraph.js:157).
+function owningGroupNodeIdFor(sceneGraph, objectId){
+  if (!sceneGraph || typeof sceneGraph.findNodeByObjectId !== 'function' || typeof sceneGraph.findNode !== 'function' || !(sceneGraph.nodes instanceof Map)) return null;
+  const node = sceneGraph.findNodeByObjectId(objectId);
+  if (!node || !isNonEmptyString(node.parent)) return null;
+  const parent = sceneGraph.findNode(node.parent);
+  if (!parent || parent.objectRef !== null) return null;
+  if (parent.id === sceneGraph.nodes.keys().next().value) return null;
+  return parent.id;
+}
+
 function correctionCommandFor(descriptor, index, plan, substrate){
   const tool = substrate.registry.get(descriptor.toolId);
-  const input = plainCopy(isPlainObject(descriptor.input) ? descriptor.input : {});
+  let input = plainCopy(isPlainObject(descriptor.input) ? descriptor.input : {});
+  // G-17 (PHASE 3.19): T11 translate-before-execute — dissolve-group plans
+  // carry object ids; translate them to owning group-node ids (dedup,
+  // order-preserving) at execution time, where the substrate's scene graph is
+  // available. ANY unresolvable object declines the WHOLE command honestly
+  // (no partial mutation, no fabricated ids): the transaction fails atomically
+  // and the loop surfaces a FAILED attempt — E-7's NO_PROGRESS semantics
+  // survive for genuinely invalid inputs, with no new loop states (§50/§51).
+  let declineMessage = null;
+  if (descriptor.toolId === 'T11' && Array.isArray(input.objectIds)){
+    const groupIds = [];
+    for (const oid of input.objectIds){
+      const gid = owningGroupNodeIdFor(substrate.sceneGraph, oid);
+      if (gid === null){ declineMessage = `dissolve-group declined honestly: object ${oid} has no owning group node (unattached, top-level, object-node parent, or scene-root parent) — no fabricated group id`; break; }
+      if (!groupIds.includes(gid)) groupIds.push(gid);
+    }
+    if (declineMessage === null) input = { ...input, objectIds: groupIds };
+  }
   const command = {
     id: contentId('ccmd-', { planId: plan.id, commandIndex: index, toolId: descriptor.toolId }),
     toolId: descriptor.toolId,
     input,
     deterministic: tool.deterministic === true,
     execute(ctx){
+      if (declineMessage !== null) return { success: false, error: declineMessage };
       const view = substrateWorkingCopyView(ctx.workingCopy);
       const toolContext = { ...substrate, workingCopy: view };
       const check = tool.validate(input, toolContext);

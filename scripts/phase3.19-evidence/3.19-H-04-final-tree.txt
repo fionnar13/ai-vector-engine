@@ -1,0 +1,31 @@
+--- git status --porcelain (13 expected) ---
+ M scripts/run-suite.sh
+ M src-js/correction.js
+ M src-js/critic.js
+ M src-js/dsl.js
+ M src-js/evaluation.js
+ M src-js/tools.js
+ M src-js/transaction.js
+ M tests/constraint-inference.test.mjs
+ M tests/correction.test.mjs
+D  tests/interaction.test_1.mjs
+ M tests/semantic-inference.test.mjs
+?? scripts/phase3.19-evidence/
+?? tests/phase3.19.test.mjs
+--- entry count: 13 ---
+--- git diff --stat HEAD ---
+ scripts/run-suite.sh                |    2 +-
+ src-js/correction.js                |   65 ++-
+ src-js/critic.js                    |   45 +-
+ src-js/dsl.js                       |   74 ++-
+ src-js/evaluation.js                |    9 +-
+ src-js/tools.js                     |   27 +-
+ src-js/transaction.js               |   78 ++-
+ tests/constraint-inference.test.mjs |   73 ++-
+ tests/correction.test.mjs           |    7 +-
+ tests/interaction.test_1.mjs        | 1028 -----------------------------------
+ tests/semantic-inference.test.mjs   |   10 +-
+ 11 files changed, 327 insertions(+), 1091 deletions(-)
+--- staged ---
+ tests/interaction.test_1.mjs | 1028 ------------------------------------------
+ 1 file changed, 1028 deletions(-)

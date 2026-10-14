@@ -1,0 +1,54 @@
+=== Command Tests ===
+✓ create object
+✓ delete object
+✓ move object
+✓ transform object
+✓ update geometry
+✓ update appearance
+✓ create node
+✓ delete node
+✓ reparent node
+✓ set z order
+
+=== Transaction Tests ===
+✓ single command transaction
+✓ multi-command transaction
+✓ validation failure
+✓ command failure rollback
+✓ atomic commit
+✓ diff generation
+✓ journal normalization
+
+=== Working Copy Tests ===
+✓ canonical unchanged before commit
+✓ failed transaction leaves canonical unchanged
+
+=== Undo Tests ===
+✓ Create Undo
+✓ Move Undo
+✓ Delete Undo
+
+=== Redo Tests ===
+✓ Create Undo Redo
+✓ Move Undo Redo
+
+=== Branch Invalidation ===
+✓ Redo unavailable after new transaction
+
+=== Event Tests ===
+✓ No event before commit
+✓ Events after commit
+✓ TransactionCommitted after mutation events
+✓ Failed transaction produces no commit event
+
+=== Determinism Tests ===
+✓ Deterministic diff
+
+=== Vertical Slice ===
+✓ Create Artboard Create Rectangle Move Change Appearance Undo Undo Redo
+
+=== Numeric Example ===
+✓ Rectangle position 0,0 -> move 100,50 -> Undo -> Redo
+
+Tests: 32 total, 32 passed, 0 failed
+EXIT_CODE=0

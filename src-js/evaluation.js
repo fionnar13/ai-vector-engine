@@ -1156,6 +1156,13 @@ function constraintCompliance(constraints, actualState, tolerance){
       ? record.parameters.distance
       : bboxQuantityOf(reference.bbox, spec.quantity);
     let violated = null;
+    // G-19 (PHASE 3.19): evaluate ALL participants and emit the WORST offender
+    // (max |actual - expected|); deterministic tie-break = lowest participant
+    // index (strict > keeps the first). The B-approved worst-offender policy
+    // replaces the legacy first-found `break`, which made the deviation carry
+    // an incidental participant and magnitude. The deviation record SHAPE is
+    // unchanged: exactly ONE deviation per violating constraint record, emitted
+    // through the same createDeviation call below.
     for (let i = 1; i < boxes.length; i++){
       const actual = record.type === 'fixedDistance'
         ? Math.hypot((boxes[i].bbox.minX + boxes[i].bbox.maxX) / 2 - (reference.bbox.minX + reference.bbox.maxX) / 2,
@@ -1163,7 +1170,7 @@ function constraintCompliance(constraints, actualState, tolerance){
         : bboxQuantityOf(boxes[i].bbox, spec.quantity);
       if (!isFiniteNumber(actual)) continue;
       const error = Math.abs(actual - expected);
-      if (error > tolerance){ violated = { participant: boxes[i], actual, error }; break; }
+      if (error > tolerance && (violated === null || error > violated.error)){ violated = { participant: boxes[i], actual, error }; }
     }
     if (violated === null){
       results.push(deepFreeze({ constraintId: record.id, type: record.type, status: 'SATISFIED', expected, tolerance }));

@@ -574,10 +574,30 @@ export class DSLExecutor {
           const actual=env.resolve(ref);
           if(!actual){
             errors.push(createError(DSLErrorCodes.UNKNOWN_REFERENCE, `Unknown reference ${ref} at IR ${i}`, {ref, irIndex: i}, toolIR.sourceInstructionIndex, ref));
-            // Rollback on unknown reference
+            // Rollback on unknown reference. G-10 (PHASE 3.19): when the T04 deletion itself
+            // throws, the previous fallback was a RAW objectStore.delete(oid) — a silent
+            // mutation OUTSIDE the substrate (the sanctioned pipeline is DSL -> ToolRegistry ->
+            // Command -> Transaction, ARCHITECTURE.md:42; a direct store write diverges the
+            // stores from the transaction record). The fallback now routes through the
+            // substrate channel T04 itself uses on a workingCopy context
+            // (workingCopy.deleteObject, tools.js:302); when no substrate channel is available
+            // the incomplete rollback is RECORDED as an honest EXECUTION_FAILED error and the
+            // created object is RETAINED — never a silent out-of-substrate mutation.
             for(let ri=createdObjectIds.length-1; ri>=0; ri--){
               const oid=createdObjectIds[ri];
-              try { context.toolRegistry.execute('T04', {objectIds:[oid]}, context.documentContext); } catch { try { if(context.documentContext.objectStore && context.documentContext.objectStore.delete) context.documentContext.objectStore.delete(oid); } catch {} }
+              try {
+                context.toolRegistry.execute('T04', {objectIds:[oid]}, context.documentContext);
+              } catch (rollbackError) {
+                const dc=context.documentContext;
+                if(dc && dc.workingCopy && typeof dc.workingCopy.deleteObject==='function'){
+                  try { dc.workingCopy.deleteObject(oid); }
+                  catch (substrateError) {
+                    errors.push(createError(DSLErrorCodes.EXECUTION_FAILED, `Substrate rollback failed for created object ${oid}: ${substrateError && substrateError.message ? substrateError.message : String(substrateError)}`, {objectId: oid, irIndex: i}, toolIR.sourceInstructionIndex));
+                  }
+                } else {
+                  errors.push(createError(DSLErrorCodes.EXECUTION_FAILED, `Rollback incomplete for created object ${oid}: the T04 deletion threw (${rollbackError && rollbackError.message ? rollbackError.message : String(rollbackError)}) and no substrate channel (workingCopy) is available on this context; the object is RETAINED — no raw out-of-substrate deletion was performed`, {objectId: oid, irIndex: i}, toolIR.sourceInstructionIndex));
+                }
+              }
             }
             return {success:false, outputs, errors, warnings, ir};
           }
@@ -594,19 +614,35 @@ export class DSLExecutor {
         const result=context.toolRegistry.execute(toolIR.toolId, resolvedInput, context.documentContext);
         if(!result.success){
           errors.push(createError(DSLErrorCodes.EXECUTION_FAILED, `Tool ${toolIR.toolId} failed: ${result.errors?.[0]?.message||'unknown'}`, {toolId: toolIR.toolId, errors: result.errors, irIndex: i}, toolIR.sourceInstructionIndex));
-          // Rollback: delete all created objects in reverse order
+          // Rollback: delete all created objects in reverse order.
+          // G-10 sibling (PHASE 3.19 C1): BOTH fallback arms here used a RAW
+          // objectStore.delete(oid) — a silent mutation OUTSIDE the substrate,
+          // the same bypass class the G-10 fix removed from the
+          // unknown-reference arm (above). The rollback now routes through the
+          // substrate channel T04 itself uses on a workingCopy context
+          // (workingCopy.deleteObject, tools.js:302); when no substrate channel
+          // is available the incomplete rollback is RECORDED as an honest
+          // EXECUTION_FAILED error and the created object is RETAINED — never
+          // a silent out-of-substrate mutation.
           for(let ri=createdObjectIds.length-1; ri>=0; ri--){
             const oid=createdObjectIds[ri];
+            let rollbackFailure=null;
             try {
               const delRes=context.toolRegistry.execute('T04', {objectIds:[oid]}, context.documentContext);
-              if(!delRes.success){
-                // Fallback direct delete if tool fails
-                if(context.documentContext.objectStore && context.documentContext.objectStore.delete){
-                  try { context.documentContext.objectStore.delete(oid); } catch {}
+              if(!delRes.success) rollbackFailure=`the T04 deletion failed (${delRes.errors?.[0]?.message||'unknown'})`;
+            } catch (rollbackError) {
+              rollbackFailure=`the T04 deletion threw (${rollbackError && rollbackError.message ? rollbackError.message : String(rollbackError)})`;
+            }
+            if(rollbackFailure){
+              const dc=context.documentContext;
+              if(dc && dc.workingCopy && typeof dc.workingCopy.deleteObject==='function'){
+                try { dc.workingCopy.deleteObject(oid); }
+                catch (substrateError) {
+                  errors.push(createError(DSLErrorCodes.EXECUTION_FAILED, `Substrate rollback failed for created object ${oid}: ${substrateError && substrateError.message ? substrateError.message : String(substrateError)}`, {objectId: oid, irIndex: i}, toolIR.sourceInstructionIndex));
                 }
+              } else {
+                errors.push(createError(DSLErrorCodes.EXECUTION_FAILED, `Rollback incomplete for created object ${oid}: ${rollbackFailure} and no substrate channel (workingCopy) is available on this context; the object is RETAINED — no raw out-of-substrate deletion was performed`, {objectId: oid, irIndex: i}, toolIR.sourceInstructionIndex));
               }
-            } catch {
-              try { if(context.documentContext.objectStore && context.documentContext.objectStore.delete) context.documentContext.objectStore.delete(oid); } catch {}
             }
           }
           return {success:false, outputs, errors, warnings, ir};
@@ -626,9 +662,27 @@ export class DSLExecutor {
         }
       } catch(e){
         errors.push(createError(DSLErrorCodes.EXECUTION_FAILED, `Exception executing tool ${toolIR.toolId}: ${e.message}`, {toolId: toolIR.toolId, error: e.message, irIndex: i}, toolIR.sourceInstructionIndex));
+        // G-10 sibling (PHASE 3.19 C1): the fallback here used a RAW
+        // objectStore.delete(oid) — the same out-of-substrate bypass class as
+        // the tool-failed arm above; identical substrate-routed repair (T04
+        // first, then workingCopy.deleteObject, then an honest EXECUTION_FAILED
+        // record with the object RETAINED — never a raw store mutation).
         for(let ri=createdObjectIds.length-1; ri>=0; ri--){
           const oid=createdObjectIds[ri];
-          try { context.toolRegistry.execute('T04', {objectIds:[oid]}, context.documentContext); } catch { try { if(context.documentContext.objectStore && context.documentContext.objectStore.delete) context.documentContext.objectStore.delete(oid); } catch {} }
+          let rollbackFailure=null;
+          try { context.toolRegistry.execute('T04', {objectIds:[oid]}, context.documentContext); }
+          catch (rollbackError) { rollbackFailure=`the T04 deletion threw (${rollbackError && rollbackError.message ? rollbackError.message : String(rollbackError)})`; }
+          if(rollbackFailure){
+            const dc=context.documentContext;
+            if(dc && dc.workingCopy && typeof dc.workingCopy.deleteObject==='function'){
+              try { dc.workingCopy.deleteObject(oid); }
+              catch (substrateError) {
+                errors.push(createError(DSLErrorCodes.EXECUTION_FAILED, `Substrate rollback failed for created object ${oid}: ${substrateError && substrateError.message ? substrateError.message : String(substrateError)}`, {objectId: oid, irIndex: i}, toolIR.sourceInstructionIndex));
+              }
+            } else {
+              errors.push(createError(DSLErrorCodes.EXECUTION_FAILED, `Rollback incomplete for created object ${oid}: ${rollbackFailure} and no substrate channel (workingCopy) is available on this context; the object is RETAINED — no raw out-of-substrate deletion was performed`, {objectId: oid, irIndex: i}, toolIR.sourceInstructionIndex));
+            }
+          }
         }
         return {success:false, outputs, errors, warnings, ir};
       }

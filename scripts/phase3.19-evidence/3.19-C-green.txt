@@ -1,0 +1,6 @@
+✓ G5-1: T10 legacy sceneGraph-direct branch constructs the group honestly — the returned groupNodeId resolves to a real node and the members are reparented (G-5)
+✓ G5-2: T10 legacy branch failure arm is an HONEST failure — when group construction throws, the result is success:false with structured errors, NEVER success:true carrying an id (G-5)
+✓ G10-1: no-substrate context — when T04 throws, the DSL rollback RETAINS the created objects and records an honest EXECUTION_FAILED error; no silent out-of-substrate store mutation (G-10)
+✓ G10-2: standing-workingCopy substrate context — when T04 throws, the rollback deletes through workingCopy.deleteObject (the T04 substrate channel, tools.js:302) and the committed objectStore is NOT directly mutated (G-10)
+
+Tests: 4 total, 4 passed, 0 failed

@@ -1,0 +1,174 @@
+=== PART 4: Dependency Result ===
+--- git diff HEAD -- package.json (expect empty) ---
+[diff-bytes=0]
+--- git status --porcelain -- package.json (expect empty) ---
+[status-lines=0]
+--- package-lock.json / npm-shrinkwrap.json existence + git status ---
+package-lock.json ABSENT
+npm-shrinkwrap.json ABSENT
+--- git diff HEAD -- package-lock.json npm-shrinkwrap.json (expect empty) ---
+[lock-diff-bytes=0]
+--- import/require delta lines across the six modified src-js files (expect EMPTY) ---
++// module must not import it; the inverse transform is plain matrix inversion.
+--- import lines currently in the six modified src-js files ---
+src-js/tools.js: 5 import statements
+2:import { TransactionBuilder } from './transaction.js';
+3:import * as Mat from './matrix.js';
+4:import * as BBox from './bbox.js';
+5:import { generateStarVertices, booleanOperation, detectParametricShape } from './geometry.js';
+src-js/dsl.js: 0 import statements
+src-js/transaction.js: 0 import statements
+src-js/evaluation.js: 2 import statements
+48:import { rectBBox, ellipseBBox } from './geometry.js';
+49:import { transform as bboxTransform, center as bboxCenter } from './bbox.js';
+src-js/critic.js: 1 import statements
+104:import { evaluate, validateEvaluationResult } from './evaluation.js';
+src-js/correction.js: 0 import statements
+--- package.json dependency fields ---
+(no dependency fields)
+
+=== PART 5: Frozen-Tree Result ===
+--- git status --porcelain -- src/core (expect 0 entries) ---
+[src-core-entries=0]
+--- git diff HEAD --stat -- src/core (expect empty) ---
+[src-core-diff-bytes=0]
+--- 178-file manifest aggregate sha256 constant in the two guards ---
+tests/evaluation-critic.test.mjs:2031:// 137327739471ff095325854c296a82aa84afde0258b396ad6902b22de3e21e56) generated
+tests/evaluation-critic.test.mjs:2267:  eq(m.aggregate, '137327739471ff095325854c296a82aa84afde0258b396ad6902b22de3e21e56', 'src/core aggregate manifest sha256 matches the frozen snapshot — any modification, addition, or deletion flips it');
+tests/correction.test.mjs:3481:// sha256 137327739471ff095325854c296a82aa84afde0258b396ad6902b22de3e21e56 —
+tests/correction.test.mjs:3738:  eq(m.aggregate, '137327739471ff095325854c296a82aa84afde0258b396ad6902b22de3e21e56', 'src/core aggregate manifest sha256 matches the frozen snapshot — any modification, addition, or deletion flips it');
+--- contour.ts untouched + sanctioned sites live ---
+[contour-status-lines=0]
+0
+    id: id ?? `anchor_${Math.random().toString(36).slice(2,9)}`, // will be deterministic in conversion layer, but for manual creation random is ok
+    id: id ?? `contour_${Math.random().toString(36).slice(2,9)}`,
+[contour line count: 66]
+--- live file count under src/core ---
+178
+
+=== PART 7 evidence: fix sites + bypass elimination ===
+--- dsl.js objectStore.delete occurrences (expect comment-text only) ---
+578:            // throws, the previous fallback was a RAW objectStore.delete(oid) — a silent
+619:          // objectStore.delete(oid) — a silent mutation OUTSIDE the substrate,
+666:        // objectStore.delete(oid) — the same out-of-substrate bypass class as
+--- dsl.js sanctioned workingCopy.deleteObject fallbacks ---
+583:            // (workingCopy.deleteObject, tools.js:302); when no substrate channel is available
+592:                if(dc && dc.workingCopy && typeof dc.workingCopy.deleteObject==='function'){
+593:                  try { dc.workingCopy.deleteObject(oid); }
+623:          // (workingCopy.deleteObject, tools.js:302); when no substrate channel
+638:              if(dc && dc.workingCopy && typeof dc.workingCopy.deleteObject==='function'){
+639:                try { dc.workingCopy.deleteObject(oid); }
+668:        // first, then workingCopy.deleteObject, then an honest EXECUTION_FAILED
+677:            if(dc && dc.workingCopy && typeof dc.workingCopy.deleteObject==='function'){
+678:              try { dc.workingCopy.deleteObject(oid); }
+--- dsl.js import statements (zero-import claim) ---
+0
+0
+--- correction.js owningGroupNodeIdFor (G-17) ---
+2452:function owningGroupNodeIdFor(sceneGraph, objectId){
+2476:      const gid = owningGroupNodeIdFor(substrate.sceneGraph, oid);
+--- transaction.js createTransformObjectCommand (G-6) ---
+570:export function createTransformObjectCommand(input){
+609:      return createTransformObjectCommand({objectId: input.objectId, transform: inv});
+--- evaluation.js worst-offender (G-19) ---
+1161:    // index (strict > keeps the first). The B-approved worst-offender policy
+--- critic.js size-class arm (G-18) ---
+466://   size-class violations (equalWidth/equalHeight -> 'size.width'/'size.height')
+492:const CONSTRAINT_CORRECTABLE_PROPERTIES = deepFreeze(['position.x', 'position.y', 'size.width', 'size.height']);
+517:  if (property === 'size.width' || property === 'size.height'){
+526:    const sx = property === 'size.width' ? expected / actual : 1;
+
+=== PART 8: Working-Tree Delta ===
+--- HEAD (must be 67fe72b, no commits made) ---
+67fe72b8b188398ca8062dde35ef94199577d0b4
+--- exact git status --porcelain ---
+ M scripts/run-suite.sh
+ M src-js/correction.js
+ M src-js/critic.js
+ M src-js/dsl.js
+ M src-js/evaluation.js
+ M src-js/tools.js
+ M src-js/transaction.js
+ M tests/constraint-inference.test.mjs
+ M tests/correction.test.mjs
+D  tests/interaction.test_1.mjs
+ M tests/semantic-inference.test.mjs
+?? scripts/phase3.19-evidence/
+?? tests/phase3.19.test.mjs
+--- git diff --stat HEAD (tracked modifications) ---
+ scripts/run-suite.sh                |    2 +-
+ src-js/correction.js                |   65 ++-
+ src-js/critic.js                    |   45 +-
+ src-js/dsl.js                       |   74 ++-
+ src-js/evaluation.js                |    9 +-
+ src-js/tools.js                     |   27 +-
+ src-js/transaction.js               |   78 ++-
+ tests/constraint-inference.test.mjs |   73 ++-
+ tests/correction.test.mjs           |    7 +-
+ tests/interaction.test_1.mjs        | 1028 -----------------------------------
+ tests/semantic-inference.test.mjs   |   10 +-
+ 11 files changed, 327 insertions(+), 1091 deletions(-)
+--- staged delta ---
+ tests/interaction.test_1.mjs | 1028 ------------------------------------------
+ 1 file changed, 1028 deletions(-)
+--- untracked files ---
+scripts/phase3.19-evidence/3.19-A-RECON-REPORT.md
+scripts/phase3.19-evidence/3.19-A-baseline.txt
+scripts/phase3.19-evidence/3.19-B-TRIAGE-REPORT.md
+scripts/phase3.19-evidence/3.19-C-P0-FIXES-REPORT.md
+scripts/phase3.19-evidence/3.19-C-green.txt
+scripts/phase3.19-evidence/3.19-C-red.txt
+scripts/phase3.19-evidence/3.19-C-suite.txt
+scripts/phase3.19-evidence/3.19-C1-MICRO-FIXES-REPORT.md
+scripts/phase3.19-evidence/3.19-C1-byte-identity.txt
+scripts/phase3.19-evidence/3.19-C1-dsl.txt
+scripts/phase3.19-evidence/3.19-C1-green-part2.txt
+scripts/phase3.19-evidence/3.19-C1-green-sd8.txt
+scripts/phase3.19-evidence/3.19-C1-green.txt
+scripts/phase3.19-evidence/3.19-C1-red-sd8.txt
+scripts/phase3.19-evidence/3.19-C1-red.txt
+scripts/phase3.19-evidence/3.19-C1-suite.txt
+scripts/phase3.19-evidence/3.19-C1-tools.txt
+scripts/phase3.19-evidence/3.19-D-P1-FIXES-REPORT.md
+scripts/phase3.19-evidence/3.19-D-dsl.txt
+scripts/phase3.19-evidence/3.19-D-g17-correction.txt
+scripts/phase3.19-evidence/3.19-D-g18-constraint.txt
+scripts/phase3.19-evidence/3.19-D-g18-correction.txt
+scripts/phase3.19-evidence/3.19-D-g19-constraint.txt
+scripts/phase3.19-evidence/3.19-D-g19-evalcritic.txt
+scripts/phase3.19-evidence/3.19-D-g6-c18.txt
+scripts/phase3.19-evidence/3.19-D-g6-transaction.txt
+scripts/phase3.19-evidence/3.19-D-green-part1.txt
+scripts/phase3.19-evidence/3.19-D-green-part2.txt
+scripts/phase3.19-evidence/3.19-D-green-part3.txt
+scripts/phase3.19-evidence/3.19-D-green.txt
+scripts/phase3.19-evidence/3.19-D-red.txt
+scripts/phase3.19-evidence/3.19-D-seminf.txt
+scripts/phase3.19-evidence/3.19-D-suite.txt
+scripts/phase3.19-evidence/3.19-D-tools.txt
+scripts/phase3.19-evidence/3.19-D1-REPIN-REPORT.md
+scripts/phase3.19-evidence/3.19-D1-constraint.txt
+scripts/phase3.19-evidence/3.19-D1-dsl.txt
+scripts/phase3.19-evidence/3.19-D1-evalcritic.txt
+scripts/phase3.19-evidence/3.19-D1-g4.txt
+scripts/phase3.19-evidence/3.19-D1-p319.txt
+scripts/phase3.19-evidence/3.19-D1-seminf.txt
+scripts/phase3.19-evidence/3.19-D1-suite.txt
+scripts/phase3.19-evidence/3.19-D1-tools.txt
+scripts/phase3.19-evidence/3.19-D1-transaction.txt
+scripts/phase3.19-evidence/3.19-E-00-git-status.txt
+scripts/phase3.19-evidence/3.19-E-01-g2-syntaxerror.txt
+scripts/phase3.19-evidence/3.19-E-02-g2-unregistered-unreferenced.txt
+scripts/phase3.19-evidence/3.19-E-03-g2-postdelete-status.txt
+scripts/phase3.19-evidence/3.19-E-04-g2-interaction-postdelete.txt
+scripts/phase3.19-evidence/3.19-E-05-g12-prescan.txt
+scripts/phase3.19-evidence/3.19-E-06-g12-red.txt
+scripts/phase3.19-evidence/3.19-E-07-g12-byte-identity.txt
+scripts/phase3.19-evidence/3.19-E-08-registration.txt
+scripts/phase3.19-evidence/3.19-E-09-architecture.txt
+scripts/phase3.19-evidence/3.19-E-10-correction.txt
+scripts/phase3.19-evidence/3.19-E-11-run-suite.txt
+scripts/phase3.19-evidence/3.19-E-12-final-state.txt
+scripts/phase3.19-evidence/3.19-E-P2-FIXES-REPORT.md
+scripts/phase3.19-evidence/3.19-E-pre-phase319-copy.mjs
+scripts/phase3.19-evidence/3.19-E1-00-preflight.txt

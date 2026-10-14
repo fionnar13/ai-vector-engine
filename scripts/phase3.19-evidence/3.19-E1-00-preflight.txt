@@ -1,0 +1,28 @@
+=== branch/HEAD ===
+feat/phase-3.19-phase-g-cleanup
+67fe72b8b188398ca8062dde35ef94199577d0b4
+=== git status (expect E end-state: 12 entries incl staged D) ===
+ M scripts/run-suite.sh
+ M src-js/correction.js
+ M src-js/critic.js
+ M src-js/dsl.js
+ M src-js/evaluation.js
+ M src-js/tools.js
+ M src-js/transaction.js
+ M tests/constraint-inference.test.mjs
+ M tests/correction.test.mjs
+ M tests/semantic-inference.test.mjs
+?? scripts/phase3.19-evidence/
+?? tests/phase3.19.test.mjs
+D  tests/interaction.test_1.mjs
+=== pin targets live: ALL Math.random occurrences in contour.ts ===
+12:    id: id ?? `anchor_${Math.random().toString(36).slice(2,9)}`, // will be deterministic in conversion layer, but for manual creation random is ok
+48:    id: id ?? `contour_${Math.random().toString(36).slice(2,9)}`,
+count=2
+=== contour.ts trailing newline? ===
+0000000  \n
+=== phase3.19.test.mjs current shape ===
+811 tests/phase3.19.test.mjs
+746:const G12_CAP_WORDS = ['fs','fetch','window','document','eval','Function','process','globalThis','require','localStorage'];
+793:  // THE SCAN (Checkpoint-E steps 3-4): zero alias-form capability hits in
+804:  eq(g12Violations.join(','), '', 'the geometry kernel code bodies contain ZERO alias-form capability references (G-12)');

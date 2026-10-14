@@ -1,0 +1,21 @@
+Architecture Checks - Geometry Kernel:
+✓ src/core/geometry/types.ts - no forbidden imports
+✓ src/core/geometry/rect.ts - no forbidden imports
+✓ src/core/geometry/ellipse.ts - no forbidden imports
+✓ src/core/geometry/polygon.ts - no forbidden imports
+✓ src/core/geometry/star.ts - no forbidden imports
+✓ src/core/geometry/line.ts - no forbidden imports
+✓ src/core/geometry/bezier.ts - no forbidden imports
+✓ src/core/geometry/contour.ts - no forbidden imports
+✓ src/core/geometry/path.ts - no forbidden imports
+✓ src/core/geometry/bbox.ts - no forbidden imports
+✓ src/core/geometry/flatten.ts - no forbidden imports
+✓ src/core/geometry/validation.ts - no forbidden imports
+✓ src/core/geometry/conversion.ts - no forbidden imports
+✓ src/core/geometry/detection.ts - no forbidden imports
+✓ src/core/geometry/transform.ts - no forbidden imports
+✓ Geometry has no UI/Renderer/SceneGraph/AI/FS dependencies
+✓ No circular dependency (Math -> Geometry only)
+
+Architecture tests PASS
+EXIT_CODE=0

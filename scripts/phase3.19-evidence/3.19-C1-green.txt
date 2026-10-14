@@ -1,0 +1,11 @@
+✓ G5-1: T10 legacy sceneGraph-direct branch constructs the group honestly — the returned groupNodeId resolves to a real node and the members are reparented (G-5)
+✓ G5-2: T10 legacy branch failure arm is an HONEST failure — when group construction throws, the result is success:false with structured errors, NEVER success:true carrying an id (G-5)
+✓ G5-3: T10 terminal fallback arm (context with NEITHER workingCopy NOR sceneGraph) is an HONEST failure — no fabricated success:true groupNodeId under any path (G-5 terminal arm, C1)
+✓ G10-1: no-substrate context — when T04 throws, the DSL rollback RETAINS the created objects and records an honest EXECUTION_FAILED error; no silent out-of-substrate store mutation (G-10)
+✓ G10-2: standing-workingCopy substrate context — when T04 throws, the rollback deletes through workingCopy.deleteObject (the T04 substrate channel, tools.js:302) and the committed objectStore is NOT directly mutated (G-10)
+✓ G10-3: tool-failed arm, no-substrate context — when the executing tool fails and T04 also fails, the rollback RETAINS the created objects and records honest EXECUTION_FAILED errors; no silent out-of-substrate store mutation (G-10 sibling, C1)
+✓ G10-4: tool-failed arm, standing-workingCopy substrate context — the rollback deletes through workingCopy.deleteObject (the T04 substrate channel, tools.js:302) and the committed objectStore is NOT directly mutated (G-10 sibling, C1)
+✓ G10-5: exception arm, no-substrate context — when the executing tool throws and T04 also fails, the rollback RETAINS the created objects and records honest EXECUTION_FAILED errors; no silent out-of-substrate store mutation (G-10 sibling, C1)
+✓ G10-6: exception arm, standing-workingCopy substrate context — the rollback deletes through workingCopy.deleteObject (the T04 substrate channel, tools.js:302) and the committed objectStore is NOT directly mutated (G-10 sibling, C1)
+
+Tests: 9 total, 9 passed, 0 failed

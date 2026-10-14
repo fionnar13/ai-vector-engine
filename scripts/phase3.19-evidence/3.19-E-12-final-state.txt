@@ -1,0 +1,29 @@
+=== git status post-E ===
+ M scripts/run-suite.sh
+ M src-js/correction.js
+ M src-js/critic.js
+ M src-js/dsl.js
+ M src-js/evaluation.js
+ M src-js/tools.js
+ M src-js/transaction.js
+ M tests/constraint-inference.test.mjs
+ M tests/correction.test.mjs
+ M tests/semantic-inference.test.mjs
+?? scripts/phase3.19-evidence/
+?? tests/phase3.19.test.mjs
+D  tests/interaction.test_1.mjs
+
+=== src/core untouched by E (and by all 3.19 checkpoints) ===
+0
+(0 = no src/core modifications)
+
+=== package.json untouched ===
+0
+(0 = clean)
+
+=== phase3.19.test.mjs final line count ===
+811 tests/phase3.19.test.mjs
+
+=== interaction.test_1.mjs gone from worktree+index ===
+ls: cannot access 'tests/interaction.test_1.mjs': No such file or directory
+0
