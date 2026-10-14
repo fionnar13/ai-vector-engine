@@ -1,0 +1,8 @@
+# C1 pure-insertion proof: tests/phase3.19.test.mjs vs pre-C1 copy
+# (0 '<' lines = zero removed/changed lines => Checkpoint C tests byte-identical)
+
+0
+removed-lines-count above
+ src-js/dsl.js   | 74 +++++++++++++++++++++++++++++++++++++++++++++++++--------
+ src-js/tools.js | 27 +++++++++++++++++----
+ 2 files changed, 86 insertions(+), 15 deletions(-)

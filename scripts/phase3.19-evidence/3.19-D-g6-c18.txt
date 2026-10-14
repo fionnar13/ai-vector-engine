@@ -1,0 +1,2 @@
+✓ C-18: LIVE grounding — every generator-emitted command passes the live ToolRegistry validators; every plan kind maps to a REAL transaction.js factory; the local input contract is necessary AND sufficient against the live validators
+Tests: 144 total, 144 passed, 0 failed

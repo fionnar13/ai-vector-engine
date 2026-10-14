@@ -1,0 +1,48 @@
+✓ G5-1: T10 legacy sceneGraph-direct branch constructs the group honestly — the returned groupNodeId resolves to a real node and the members are reparented (G-5)
+✓ G5-2: T10 legacy branch failure arm is an HONEST failure — when group construction throws, the result is success:false with structured errors, NEVER success:true carrying an id (G-5)
+✓ G5-3: T10 terminal fallback arm (context with NEITHER workingCopy NOR sceneGraph) is an HONEST failure — no fabricated success:true groupNodeId under any path (G-5 terminal arm, C1)
+✓ G6-1: createTransformObjectCommand applies the affine matrix to the geometry through the substrate — a real translate moves the rect and preserves its size (G-6)
+✓ G6-2: createTransformObjectCommand.getInverse() round-trips — apply the transform, apply the declared inverse, the geometry is restored byte-exactly (G-6)
+✓ G19-1: worst-offender selection — the emitted deviation names the MAX-error participant, not the first-found one; exactly one deviation per constraint record, shape unchanged (G-19)
+✓ G19-2: single-violator constraint is unchanged — one deviation naming the only violator with the same expected/actual/delta contract (G-19 regression guard)
+✓ G19-3: SATISFIED path unchanged — a satisfied constraint emits zero deviations and a SATISFIED result (G-19 regression guard)
+✗ G18-1: size-class critic arm — an equalWidth violation proposes ONE 7-key scale intent on the worst-offender participant with factor = expected/actual (G-18): G-18 RED: the size-class arm must propose ONE scale intent — the legacy posture declined silently (no proposal): 0 !== 1
+Error: G-18 RED: the size-class arm must propose ONE scale intent — the legacy posture declined silently (no proposal): 0 !== 1
+    at eq (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:47:39)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:496:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:45:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:489:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ G18-2: the size-class agenda closes the loop — the scale-to-target-size plan derives the T06 transform, executes through the substrate, and the re-evaluation is SATISFIED (G-18): G-18 RED: the size-class agenda must close the loop — the legacy posture refused the plan (T06 rule-less, INSUFFICIENT_EVIDENCE) and terminated UNFIXABLE: "UNFIXABLE" !== "VERIFIED"
+Error: G-18 RED: the size-class agenda must close the loop — the legacy posture refused the plan (T06 rule-less, INSUFFICIENT_EVIDENCE) and terminated UNFIXABLE: "UNFIXABLE" !== "VERIFIED"
+    at eq (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:47:39)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:526:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:45:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:507:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ G18-3: the honest-decline posture is preserved for constraint classes WITHOUT an arm — fixedDistance still proposes nothing (G-18 guard)
+✗ G17-1: T11 id translation — the dissolve-group attempt resolves object ids to the owning group node and the ungroup SUCCEEDS (group removed, members to the former parent, world transforms preserved) (G-17): engineConverge: VERIFIED has no §3 edge from ROLLING_BACK (invariant breach — a restored pre-attempt state is never agenda-satisfied)
+CorrectionError: engineConverge: VERIFIED has no §3 edge from ROLLING_BACK (invariant breach — a restored pre-attempt state is never agenda-satisfied)
+    at engineConverge (file:///home/z/my-project/ai-vector-engine/src-js/correction.js:3155:13)
+    at engineExecute (file:///home/z/my-project/ai-vector-engine/src-js/correction.js:3113:12)
+    at engineContinue (file:///home/z/my-project/ai-vector-engine/src-js/correction.js:3205:10)
+    at engineIterate (file:///home/z/my-project/ai-vector-engine/src-js/correction.js:3270:10)
+    at Object.engineRun [as run] (file:///home/z/my-project/ai-vector-engine/src-js/correction.js:3286:17)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:587:25
+    at test (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:45:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:557:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+✓ G17-2: no owning group → the honest decline — the T11 attempt FAILS without scene mutation and the loop stays NO_PROGRESS (G-17 guard)
+✓ G10-1: no-substrate context — when T04 throws, the DSL rollback RETAINS the created objects and records an honest EXECUTION_FAILED error; no silent out-of-substrate store mutation (G-10)
+✓ G10-2: standing-workingCopy substrate context — when T04 throws, the rollback deletes through workingCopy.deleteObject (the T04 substrate channel, tools.js:302) and the committed objectStore is NOT directly mutated (G-10)
+✓ G10-3: tool-failed arm, no-substrate context — when the executing tool fails and T04 also fails, the rollback RETAINS the created objects and records honest EXECUTION_FAILED errors; no silent out-of-substrate store mutation (G-10 sibling, C1)
+✓ G10-4: tool-failed arm, standing-workingCopy substrate context — the rollback deletes through workingCopy.deleteObject (the T04 substrate channel, tools.js:302) and the committed objectStore is NOT directly mutated (G-10 sibling, C1)
+✓ G10-5: exception arm, no-substrate context — when the executing tool throws and T04 also fails, the rollback RETAINS the created objects and records honest EXECUTION_FAILED errors; no silent out-of-substrate store mutation (G-10 sibling, C1)
+✓ G10-6: exception arm, standing-workingCopy substrate context — the rollback deletes through workingCopy.deleteObject (the T04 substrate channel, tools.js:302) and the committed objectStore is NOT directly mutated (G-10 sibling, C1)
+
+Tests: 19 total, 16 passed, 3 failed

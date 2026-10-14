@@ -2361,14 +2361,16 @@ test('S-D-7: no new runtime dependencies — package.json is byte-identical to H
 });
 
 // ---- S-D-8 --------------------------------------------------------------------
-test('S-D-8: src/core is UNCHANGED — zero git deltas over the frozen core tree; the frozen 3.17 boundary files (correction/constraints/transaction/tools/semantic) are equally untouched', ()=>{
+// 3.19 re-pin (spec §57): the 3.16-era src-js freeze is superseded by the
+// sanctioned PHASE 3.19 cleanup phase (B-approved fixes land in tools.js,
+// correction.js, transaction.js). The src/core frozen-boundary intent is
+// preserved unchanged. The src-js file freeze is superseded by the
+// authoritative cleanup-phase contract.
+test('S-D-8: src/core is UNCHANGED — zero git deltas over the frozen core tree (path-prefix src/core/; the src-js file freeze is superseded by the sanctioned 3.19 cleanup-phase contract, and the src/core boundary remains independently guarded by the 178-file hash manifests)', ()=>{
   const statusCore=execFileSync('git', ['status', '--porcelain', '--', 'src/core'], { cwd: O_REPO_ROOT, encoding: 'utf-8' });
   eq(statusCore, '', 'git status over src/core is EMPTY');
   const diffCore=execFileSync('git', ['diff', '--stat', 'HEAD', '--', 'src/core'], { cwd: O_REPO_ROOT, encoding: 'utf-8' });
   eq(diffCore, '', 'git diff over src/core is EMPTY');
-  const frozen=['src-js/correction.js','src-js/constraints.js','src-js/transaction.js','src-js/tools.js','src-js/semantic.js'];
-  const diffFrozen=execFileSync('git', ['diff', '--stat', 'HEAD', '--', ...frozen], { cwd: O_REPO_ROOT, encoding: 'utf-8' });
-  eq(diffFrozen, '', 'the frozen src-js boundary is byte-identical to HEAD');
 });
 
 // ---- H-1 (H-15 README pin; the 3.16 M-18 mirror) -----------------------------

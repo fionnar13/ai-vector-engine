@@ -1,0 +1,30 @@
+=== git status post-E1 ===
+ M scripts/run-suite.sh
+ M src-js/correction.js
+ M src-js/critic.js
+ M src-js/dsl.js
+ M src-js/evaluation.js
+ M src-js/tools.js
+ M src-js/transaction.js
+ M tests/constraint-inference.test.mjs
+ M tests/correction.test.mjs
+ M tests/semantic-inference.test.mjs
+?? scripts/phase3.19-evidence/
+?? tests/phase3.19.test.mjs
+D  tests/interaction.test_1.mjs
+
+=== src/core untouched ===
+0
+=== package.json untouched ===
+0
+=== contour.ts untouched (frozen; pin is test-side only) ===
+0
+=== sanctioned exceptions as shipped in the test ===
+755:const G12_SANCTIONED_EXCEPTIONS = [
+756-  { file: 'src/core/geometry/contour.ts', line: 12, pattern: 'Math.random' },
+757-  { file: 'src/core/geometry/contour.ts', line: 48, pattern: 'Math.random' }
+758-];
+=== final phase3.19.test.mjs line count ===
+866 tests/phase3.19.test.mjs
+=== no third exception check: exception-entry count ===
+2

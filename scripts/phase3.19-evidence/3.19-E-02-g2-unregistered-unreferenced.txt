@@ -1,0 +1,22 @@
+=== run-suite.sh mentions of interaction.test_1 ===
+exit=1 (1 = no hits)
+
+=== run-suite.sh interaction.test.mjs (live) registration ===
+15:FILES="tests/ai.test.mjs tests/appearance-graph.test.mjs tests/appearance.test.mjs tests/constraint-inference.test.mjs tests/constraints.test.mjs tests/correction.test.mjs tests/dsl.test.mjs tests/evaluation-critic.test.mjs tests/geometry.test.mjs tests/interaction-boundaries.test.mjs tests/interaction.test.mjs tests/phase3.19.test.mjs tests/renderer.test.mjs tests/scenegraph.test.mjs tests/semantic-correction.test.mjs tests/semantic-inference.test.mjs tests/semantic.test.mjs tests/spatial-index.test.mjs tests/stores.test.mjs tests/tools.test.mjs tests/transaction.test.mjs"
+
+=== repo-wide references to interaction.test_1 (excluding the file itself) ===
+./tests/interaction-boundaries.test.mjs:2:// SALVAGE FILE — reconstructed from the corrupted tests/interaction.test_1.mjs
+./tests/interaction-boundaries.test.mjs:6:// Contains ONLY the tests unique to interaction.test_1.mjs — i.e. tests whose
+./scripts/phase3.15-evidence/3.15-H-BUILD-REPORT.md:522:| 11 | G-2 orphan test-file residual `tests/interaction.test_1.mjs` (recovery F.1) | that file | untouched (untracked-file set contains only the six accounted 3.15 entries; `git status`) |
+./scripts/phase3.16-evidence/3.16-H-BUILD-REPORT.md:631:| 11 | interaction.test_1.mjs orphan residual | that file | NOT TOUCHED (absent from git status) |
+./scripts/phase3.19-evidence/3.19-B-TRIAGE-REPORT.md:15:- Verification performed in THIS checkpoint: every load-bearing Checkpoint A citation was re-read live from the working tree at the listed file:line for all 20 items before a disposition was committed. Two live checks were re-run: `node --check tests/interaction.test_1.mjs` (SyntaxError reproduced at :580 — literal `\1` tokens) and the runner registration check (`interaction.test_1` = 0 hits in `scripts/run-suite.sh`).
+./scripts/phase3.19-evidence/3.19-B-TRIAGE-REPORT.md:25:| G-2 | FIX | P2 | delete the dead, unregistered, syntactically-broken residual test file | tests/interaction.test_1.mjs:580 (SyntaxError); scripts/run-suite.sh (0 registration hits) |
+./scripts/phase3.19-evidence/3.19-B-TRIAGE-REPORT.md:61:### G-2 — Residual tests/interaction.test_1.mjs
+./scripts/phase3.19-evidence/3.19-B-TRIAGE-REPORT.md:65:- Evidence: tests/interaction.test_1.mjs:580 (SyntaxError, reproduced live this checkpoint); `grep interaction.test_1 scripts/run-suite.sh` = 0 hits; wc -l = 1028; provenance: 3.12 backup commit 5f78594.
+./scripts/phase3.19-evidence/3.19-B-TRIAGE-REPORT.md:66:- Planned change (later checkpoint): `git rm tests/interaction.test_1.mjs` (or plain delete); no other file is touched; suite count and gates unaffected (file is unregistered).
+./scripts/phase3.19-evidence/3.19-A-RECON-REPORT.md:22:| G-2 | PRESENT (dead + broken) | residual 3.12 backup file; also syntactically invalid | none (unregistered) | YES (delete) | tests/interaction.test_1.mjs:580; scripts/run-suite.sh (FILES list, 0 hits) |
+./scripts/phase3.19-evidence/3.19-A-RECON-REPORT.md:53:### G-2 — Residual tests/interaction.test_1.mjs
+./scripts/phase3.19-evidence/3.19-A-RECON-REPORT.md:54:- Still present? YES — tests/interaction.test_1.mjs exists (1028 lines, added in 3.12 backup commit 5f78594).
+./scripts/phase3.19-evidence/3.19-A-RECON-REPORT.md:56:- Later phase changed contract? NO — but its health degraded: standalone `node tests/interaction.test_1.mjs` FAILS TO PARSE — SyntaxError at :580 (`doc.appearanceStore.create(\1, ...)` — literal `\1` tokens, likely a botched history rewrite).
+./scripts/phase3.17-evidence/3.17-H1-BUILD-REPORT.md:460:| 11 | interaction.test_1.mjs orphan residual | that file | NOT TOUCHED (absent from git status) |
+exit=0 (1 = no hits)

@@ -1,0 +1,14 @@
+✓ S-C-9: P9 linear history — the golden's history is a strictly append-only sequence; the loop appended nothing (no History DAG, Invariant 13)
+✓ S-C-10: P10 planner purity — planning over the golden records mutates NO canonical state; the context is deep-frozen; the plan carries the agenda
+✓ S-D-6: no nested transactions in the 3.17 surface — no begin-call form in the four PURE files; every golden transaction is a root transaction (parentId null) and the loop opened none
+✓ S-B-2: this path IS the S-A path — with zero semantic capability the §30 second sequence always lands on the same honest terminus (structural identity across runs)
+✓ S-C-2: P2 deterministic normalization — the SAME real T20 envelope normalizes byte-identically in independent sessions; two golden runs normalize identically (modulo substrate identity)
+✓ S-A-3: determinism — two full golden runs produce byte-identical canonical outcome projections (the SG-6 identity-entropy projection, the 3.16 M-2 form)
+
+Tests: 97 total, 96 passed, 1 failed
+✓ S-D-7: no new runtime dependencies — package.json is byte-identical to HEAD; the 3.17 production files import only relative specifiers; the test file imports only relative modules and the three declared node: builtins
+✗ S-D-8: src/core is UNCHANGED — zero git deltas over the frozen core tree; the frozen 3.17 boundary files (correction/constraints/transaction/tools/semantic) are equally untouched: the frozen src-js boundary is byte-identical to HEAD: " src-js/tools.js | 18 +++++++++++++++---\n 1 file changed, 15 insertions(+), 3 deletions(-)\n" !== ""
+Error: the frozen src-js boundary is byte-identical to HEAD: " src-js/tools.js | 18 +++++++++++++++---\n 1 file changed, 15 insertions(+), 3 deletions(-)\n" !== ""
+    at eq (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:338:39)
+    at file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:2371:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/semantic-inference.test.mjs:336:48)

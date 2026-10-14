@@ -526,14 +526,88 @@ export function createMoveObjectCommand(input){
   };
 }
 
+// G-6 (PHASE 3.19): local affine machinery. Mirrors T06's transformGeometryParams
+// (tools.js:86-111) for every parametric form, implemented LOCALLY on purpose —
+// transaction.js is DOWNSTREAM of tools.js (layering ARCHITECTURE.md:42), so the
+// module must not import it; the inverse transform is plain matrix inversion.
+// Unsupported types -> null (honest failure), exactly the T06 contract.
+function transformGeometryParamsLocal(type, p, m){
+  const tp=pt=>({x:m.a*pt.x + m.c*pt.y + m.tx, y:m.b*pt.x + m.d*pt.y + m.ty});
+  const tv=v=>({x:m.a*v.x + m.c*v.y, y:m.b*v.x + m.d*v.y});
+  switch(type){
+    case 'rect': {
+      const cs=[tp({x:p.x,y:p.y}), tp({x:p.x+p.width,y:p.y}), tp({x:p.x+p.width,y:p.y+p.height}), tp({x:p.x,y:p.y+p.height})];
+      const xs=cs.map(q=>q.x), ys=cs.map(q=>q.y);
+      const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+      const s=Math.sqrt(Math.abs(m.a*m.d - m.b*m.c));
+      return {...p, x:minX, y:minY, width:maxX-minX, height:maxY-minY, rx:(p.rx||0)*s, ry:(p.ry||0)*s};
+    }
+    case 'ellipse': {
+      const c=tp({x:p.cx, y:p.cy});
+      return {...p, cx:c.x, cy:c.y, rx:Math.hypot(m.a,m.c)*(p.rx||0), ry:Math.hypot(m.b,m.d)*(p.ry||0)};
+    }
+    case 'line': return {...p, start:tp(p.start), end:tp(p.end)};
+    case 'polygon': return {...p, points:p.points.map(tp)};
+    case 'star': {
+      const c=tp(p.center); const s=Math.sqrt(Math.abs(m.a*m.d - m.b*m.c));
+      return {...p, center:c, outerRadius:p.outerRadius*s, innerRadius:p.innerRadius*s};
+    }
+    case 'text': return {...p, position:tp(p.position)};
+    case 'path': return {...p, contours:(p.contours||[]).map(c=>({...c, anchors:c.anchors.map(a=>({...a, position:tp(a.position), handleIn:tv(a.handleIn||{x:0,y:0}), handleOut:tv(a.handleOut||{x:0,y:0})}))}))};
+    default: return null;
+  }
+}
+function isValidMatrix3(m){
+  return !!m && [m.a,m.b,m.c,m.d,m.tx,m.ty].every(v=>typeof v==='number' && Number.isFinite(v));
+}
+// Exact affine inverse of [a c tx; b d ty; 0 0 1]; null when singular (honest).
+function invertMatrix3(m){
+  const det=m.a*m.d - m.b*m.c;
+  if(!Number.isFinite(det) || Math.abs(det)<1e-12) return null;
+  return { a: m.d/det, b: -m.b/det, c: -m.c/det, d: m.a/det, tx: (m.c*m.ty - m.d*m.tx)/det, ty: (m.b*m.tx - m.a*m.ty)/det };
+}
+
 export function createTransformObjectCommand(input){
+  // G-6 (PHASE 3.19): was a LATENT NO-OP — execute read the object and wrote
+  // back an identical shallow copy (setObject({...obj})); the transform input
+  // was never applied and no inverse existed. Now: applies the affine
+  // Matrix3x3 input.transform = {a,b,c,d,tx,ty} (the T06 form, the
+  // CORRECTION_CAPABILITY_INPUT_CONTRACT.T06 'transform' key) to the object's
+  // geometry params via the local mirror above; honest structured failures on
+  // a missing object, an invalid/singular matrix, or an unsupported geometry
+  // type — never a silent no-op success. getInverse() declares the exact
+  // inverse-transform command (matrix inversion; null before any successful
+  // apply, matching the sibling factories' null-inverse discipline). The C-18
+  // pin (tests/correction.test.mjs:1447-1461) keeps mapping TransformObject to
+  // this factory; production traffic still routes through T06's own substrate
+  // wrapper (tools.js:328-332).
+  let applied=null;
   return {
     id: uuid(),
     toolId: 'transform_object',
     input,
     deterministic: true,
-    execute(ctx){ const obj=ctx.workingCopy.getObject(input.objectId); if(!obj) return {success:false, error:'Object not found'}; ctx.workingCopy.setObject({...obj}); return {success:true}; },
-    getAffectedIds(){ return {objects:[input.objectId]}; }
+    execute(ctx){
+      const obj=ctx.workingCopy.getObject(input.objectId);
+      if(!obj) return {success:false, error:'Object not found'};
+      if(!isValidMatrix3(input.transform)) return {success:false, error:'transform must be a Matrix3x3 {a,b,c,d,tx,ty} with finite entries'};
+      const det=input.transform.a*input.transform.d - input.transform.b*input.transform.c;
+      if(Math.abs(det)<1e-12) return {success:false, error:'TRANSFORM_SINGULAR: the transform matrix is singular'};
+      const geom=ctx.workingCopy.getGeometry(obj.geometryRef);
+      if(!geom || !geom.params) return {success:false, error:`Geometry not found for object ${input.objectId}`};
+      const params=transformGeometryParamsLocal(geom.type, geom.params, input.transform);
+      if(!params) return {success:false, error:`Unsupported geometry type ${geom.type} for transform`};
+      applied=input.transform;
+      ctx.workingCopy.setGeometry(obj.geometryRef, {...geom, params});
+      return {success:true};
+    },
+    getAffectedIds(){ return {objects:[input.objectId]}; },
+    getInverse(){
+      if(!applied) return null;
+      const inv=invertMatrix3(applied);
+      if(!inv) return null;
+      return createTransformObjectCommand({objectId: input.objectId, transform: inv});
+    }
   };
 }
 

@@ -1,0 +1,17 @@
+=== SpatialIndex ===
+✓ Insert
+✓ Update
+✓ Delete
+✓ Query intersection
+✓ Query point
+✓ Tolerance
+✓ Multiple candidates
+✓ Deterministic result ordering
+✓ Rebuild
+✓ Empty index
+✓ Stale-index fallback
+✓ Transform causes index update
+✓ Reparent causes appropriate bbox/index update
+
+Tests: 13 total, 13 passed, 0 failed
+EXIT_CODE=0

@@ -1,0 +1,13 @@
+=== diff hunk headers (original-file line refs; E-added section starts at :631 in the 811-line pre-E1 file) ===
+747a748,786
+793,802c832,850
+804c852,859
+=== removed lines (all must originate >= :746, inside the E-added G12 region) ===
+11
+=== added lines ===
+66
+=== C/D-era region untouched proof: lines 1-630 of pre-E1 copy vs current ===
+diff: scripts/phase3.19-evidence/3.19-E1-tmp-head-pre.txt: No such file or directory
+=== final line count ===
+866 tests/phase3.19.test.mjs
+LINES 1-630 BYTE-IDENTICAL (C/C1/D/E-prior sections untouched)

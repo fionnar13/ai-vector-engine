@@ -3652,9 +3652,12 @@ test('G-3: correction.js reaches NO store and NO renderer surface and carries no
   eq(JSON.stringify(coll), JSON.stringify(['afterByIdentity','beforeByIdentity','seen']), 'every bare .set(/.delete( receiver must be a pinned local Map binding (own-collection bookkeeping — the .push precedent class, disclosure G-46)');
 });
 
-test('G-4: correction.js scene-graph boundary — the injected scene graph is reachable ONLY through the read-only projection: every sceneGraph./scene. property access is findNodeByObjectId, the substrate shape carries exactly {registry, transactionManager, transactionBuilder, sceneGraph}, and the SceneGraph type is never referenced or constructed (§52/§66: no direct SceneGraph mutation)', ()=>{
+// 3.19 re-pin (spec §57): G-17's ratified T11 id-translation requires read-only
+// findNode + nodes access for the owning-group resolution and root-placeholder
+// exclusion; both accesses are read-only and preserve the §52/§66 no-direct-mutation intent.
+test('G-4: correction.js scene-graph boundary — the injected scene graph is reachable ONLY through the read-only projection: every sceneGraph./scene. property access is within the read-only surface {findNode, findNodeByObjectId, nodes} (the 3.19 G-17 widening), the substrate shape carries exactly {registry, transactionManager, transactionBuilder, sceneGraph}, and the SceneGraph type is never referenced or constructed (§52/§66: no direct SceneGraph mutation)', ()=>{
   const H=g15Harness();
-  eq(JSON.stringify(H.allowProps(H.corrStripped,'sceneGraph')), JSON.stringify(['findNodeByObjectId']), 'substrate.sceneGraph is pinned to the read-only findNodeByObjectId projection (§52/§66)');
+  eq(JSON.stringify(H.allowProps(H.corrStripped,'sceneGraph')), JSON.stringify(['findNode','findNodeByObjectId','nodes']), 'substrate.sceneGraph is pinned to the read-only projection WIDENED by the 3.19 G-17 re-pin (findNode: the parent-node read; nodes: the root-placeholder insertion-order read; both READ-ONLY, §52/§66)');
   eq(JSON.stringify(H.allowProps(H.corrStripped,'scene')), JSON.stringify(['findNodeByObjectId']), 'ctx.scene (the C-era dependency-scan context) is pinned to the same read-only projection');
   eq(JSON.stringify(H.allowProps(H.corrStripped,'substrate')), JSON.stringify(['registry','sceneGraph','transactionBuilder','transactionManager']), 'the substrate duck-type shape is pinned to disclosure 24 exactly — no stores, no renderer, no history object on it');
   eq(H.wordHits(H.corrStripped, 'SceneGraph').join(','), '', 'the SceneGraph TYPE is never referenced in code — injected duck-typed, never imported or constructed');

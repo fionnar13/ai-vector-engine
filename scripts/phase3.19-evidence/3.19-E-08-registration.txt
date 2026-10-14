@@ -1,0 +1,8 @@
+=== run-suite.sh line 15 (FILES) — phase3.19 registered, interaction.test_1 absent ===
+10:tests/interaction-boundaries.test.mjs
+11:tests/interaction.test.mjs
+12:tests/phase3.19.test.mjs
+=== alphabetical verify (LC_ALL=C sort -c on the FILES list) ===
+ALPHABETICAL ORDER: OK
+=== registration diff vs pre-E run-suite.sh? (expect no E-related change; file was M since C) ===
+ 1 file changed, 1 insertion(+), 1 deletion(-)

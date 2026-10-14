@@ -499,16 +499,33 @@ export const groupObjectsTool = {
       return {success:true, output:{groupNodeId:gid}};
     }
     if(context.sceneGraph && context.sceneGraph.createGroup){
+      // G-5 (PHASE 3.19): the legacy branch used to call createGroup(input.objectIds) — the
+      // object-id ARRAY landed in createGroup's parentId parameter (scenegraph.js:180 ->
+      // createNode:169-172, validateNodeCreation:138 throws on the non-UUID parent), and the
+      // catch below then returned success:true with a FABRICATED dangling groupNodeId (false
+      // success). Now the branch constructs the group HONESTLY per createGroup's signature —
+      // a root-level group (parentId null), matching the workingCopy branch above
+      // (groupNode.parentId:null, tools.js:494) — and reparents each member's scene node via
+      // the scene-graph API (reparent, scenegraph.js:213, cycle-guarded). Any residual
+      // failure is an HONEST failure (success:false, structured error), never a fabricated id.
       try {
-        const group=context.sceneGraph.createGroup(input.objectIds);
+        const group=context.sceneGraph.createGroup(null);
+        for(const oid of input.objectIds){
+          const memberNode=context.sceneGraph.findNodeByObjectId ? context.sceneGraph.findNodeByObjectId(oid) : null;
+          if(memberNode) context.sceneGraph.reparent(memberNode.id, group.id);
+        }
         return {success:true, output:{groupNodeId:group.id}};
       } catch(e){
-        const gid2=uuid();
-        return {success:true, output:{groupNodeId:gid2}};
+        return {success:false, errors:[{code:'TOOL_PRECONDITION_FAILED', message:`group_objects could not construct the group on the legacy sceneGraph path: ${e && e.message ? e.message : String(e)}`}], toolId:'T10'};
       }
     }
-    const gid=uuid();
-    return {success:true, output:{groupNodeId:gid}};
+    // G-5 terminal arm (PHASE 3.19 C1): the fallback here used to fabricate a
+    // dangling uuid and return success:true — a group id with NO scene
+    // representation whatsoever (same false-success class as the legacy
+    // branch fixed above). With NEITHER substrate present the tool cannot
+    // honor the mutation, so the honest outcome is a structured failure
+    // (honest-failure invariant: never a fabricated id under any path).
+    return {success:false, errors:[{code:'TOOL_PRECONDITION_FAILED', message:'group_objects requires a sceneGraph or workingCopy context'}], toolId:'T10'};
   },
 };
 

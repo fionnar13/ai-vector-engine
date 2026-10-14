@@ -1,0 +1,3 @@
+✓ S-A-3: determinism — two full golden runs produce byte-identical canonical outcome projections (the SG-6 identity-entropy projection, the 3.16 M-2 form)
+
+Tests: 97 total, 97 passed, 0 failed

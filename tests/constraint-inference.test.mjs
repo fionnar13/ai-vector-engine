@@ -45,16 +45,27 @@
 // correction transaction; the re-evaluation is clean; the verdict is
 // VERIFIED. Every step is asserted with live evidence.
 //
-// ENGINE-EXECUTABILITY RULING (disclosed, the F-44 tradition): the 3.15
-// derivation table (correction.js deriveForTool) carries rules ONLY for T05
-// (position metrics) and T07 (opacity metrics); T06 (scale) is rule-less, so
-// size-class constraint violations (equalWidth/equalHeight) are honestly
+// ENGINE-EXECUTABILITY RULING (disclosed, the F-44 tradition; the SIZE-CLASS
+// clause SUPERSEDED by PHASE 3.19 G-18 — disclosed re-pin): the 3.15
+// derivation table (correction.js deriveForTool) carried rules ONLY for T05
+// (position metrics) and T07 (opacity metrics); T06 (scale) was rule-less, so
+// size-class constraint violations (equalWidth/equalHeight) were honestly
 // UNFIXABLE through the engine (plan refusal INSUFFICIENT_EVIDENCE ->
-// UNFIXABLE) and the critic's constraint pass proposes NOTHING for them
-// (§28: the T06 origin-anchored scale mutates position as a side effect —
-// no SAFE capability). Position-class violations (align/center pinned-axis
-// errors) close the loop end-to-end. Surfaced as counted evidence (L-4/L-5/
-// K-4/K-5), never patched.
+// UNFIXABLE) and the critic's constraint pass proposed NOTHING for them —
+// K-4/K-5/L-4 pinned that 3.16 posture. PHASE 3.19 G-18 (B-approved) adds the
+// size-class critic arm (a scale intent on the WORST-offender participant per
+// the ratified G-19 policy) and the T06 size.* derivation rule (the
+// scale-to-target-size recipe path, correction.js SIZE_ERROR ->
+// TransformObject/T06), so size-class violations now close the loop
+// end-to-end; K-4/K-5/L-4 are re-pinned to the new honest behavior. The T06
+// origin-anchored scale's position side effect is a known, disclosed
+// MEDIUM-risk trade-off (recipe risk MEDIUM, reversible), never hidden.
+// Position-class violations close the loop end-to-end as before.
+// DISCLOSED RESIDUALS (pending acceptor rulings, NOT silently re-pinned):
+// J-6 (the first-found localization pin) and M-16/M-17 (the 3.15-era sha
+// freezes on transaction.js/correction.js) assert the superseded contract and
+// are expected to FAIL mid-phase — the same structural situation S-D-8 was in
+// before its §57 re-pin ruling.
 //
 // DETERMINISM NOTE (M-2): T01 creation ids are substrate uuid() entropy (the
 // declared identity entropy of the substrate, not of the 3.16 surface). The
@@ -992,12 +1003,15 @@ test('J-5: center constraints report the pinned center axis — alignCenterX dev
   eq(cy.deviations[0].actual, 250, 'the drifted centerY');
 });
 
-test('J-6: localization is deterministic — when MULTIPLE participants fail, the deviation names the FIRST failing participant in objectIds order (the house constraint-kernel break semantics)', ()=>{
+// 3.19 re-pin (spec §57): the first-found break semantics are superseded by the
+// RATIFIED G-19 worst-offender policy; the deviation record shape is unchanged
+// (one per record).
+test('J-6: localization is deterministic — when MULTIPLE participants fail, the deviation names the WORST offender (max |actual - expected|, tie-break = lowest index; the 3.19 G-19 worst-offender policy)', ()=>{
   const doc=mDoc([{id:UA, x:100, y:100, width:80, height:60},{id:UB, x:130, y:200, width:80, height:60},{id:UC, x:170, y:300, width:80, height:60}]);
   const result=jEvaluate(doc, [mConstraint('alignLeft',[UA,UB,UC])]);
-  eq(result.deviations.length, 1, 'ONE deviation per constraint (the first failure breaks)');
-  eq(result.deviations[0].objectId, UB, 'B is the first failing participant');
-  eq(result.deviations[0].actual, 130, 'B\'s drifted minX');
+  eq(result.deviations.length, 1, 'ONE deviation per constraint record (the record shape is unchanged by G-19)');
+  eq(result.deviations[0].objectId, UC, 'C is the WORST offender (minX error 70 over B\'s 30)');
+  eq(result.deviations[0].actual, 170, 'C\'s drifted minX');
 });
 
 test('J-7: fixedDistance violations report the distance class with the configured distance as expected', ()=>{
@@ -1115,20 +1129,22 @@ test('K-3: the delta direction follows the pinned axis — an alignTop violation
   deepEq(cx[0].intent.params, { x:-30, y:0 }, 'x = expected(140) - actual(170), y untouched');
 });
 
-test('K-4: an equalWidth violation produces NO proposal — the §28 honest gap (the only size capability T06 is origin-anchored: scaling the width moves the object; no SAFE capability exists and the architecture is never bypassed)', ()=>{
+test('K-4: an equalWidth violation proposes EXACTLY ONE scale intent (3.19 G-18 re-pin — the 3.16 honest-decline posture was superseded by the B-approved size-class arm; the scale-to-target-size recipe is the sanctioned path and the origin-anchored position side effect is the disclosed MEDIUM-risk trade-off)', ()=>{
   const doc=mDoc([{id:UA, x:100, y:100, width:80, height:60},{id:UB, x:100, y:200, width:120, height:60}]);
   const result=kEvaluation(doc, [mConstraint('equalWidth',[UA,UB])]);
   eq(result.status, 'DEVIATION', 'the violation is honestly reported');
   const out=regularProposeCorrections(result);
-  deepEq(out, [], 'no proposal for the size class — the absence IS the decline');
+  eq(out.length, 1, 'one proposal — the size-class arm (G-18)');
+  deepEq(out[0].intent, { type:'transform', targets:[UB], operation:'scale', params:{ sx: 80/120, sy: 1 } }, 'the scale intent on the worst-offender participant, factor = expected/actual');
+  eq(gValidateProposal(out[0]).valid, true, 'validates through the LIVE §25 validator');
 });
 
-test('K-5: the mixed verdict — size-class violations stay silent while the position-class violation still proposes (one pass, both faces)', ()=>{
+test('K-5: the mixed verdict (3.19 G-18 re-pin) — size-class violations now propose scale intents ALONGSIDE the position-class translate (one pass, three faces)', ()=>{
   const doc=mDoc([{id:UA, x:100, y:100, width:80, height:60},{id:UB, x:130, y:260, width:120, height:90}]);
   const result=kEvaluation(doc, [mConstraint('equalWidth',[UA,UB],{id:'c-w'}), mConstraint('equalHeight',[UA,UB],{id:'c-h'}), mConstraint('alignLeft',[UA,UB],{id:'c-l'})]);
   const out=regularProposeCorrections(result);
-  eq(out.length, 1, 'only the position-class proposal');
-  eq(out[0].intent.targets.join(','), UB, 'the drifted participant');
+  eq(out.length, 3, 'one translate + two scale proposals (equalWidth + equalHeight on the same drifted participant)');
+  expect(out.every(p => p.intent.targets.join(',') === UB), 'every proposal targets the drifted participant');
   eq(result.metadata.constraintDeviations.length, 3, 'all three violations were reported by the evaluation arm');
 });
 
@@ -1301,7 +1317,7 @@ test('L-3: a HARD violated constraint whose pinned axis the fix must mutate is N
   eq(refusals[0].reason, 'HARD_CONSTRAINT_REJECTED', 'the refusal reason');
 });
 
-test('L-4: a size-class agenda (metric size.width) resolves the scale-to-target-size recipe but the plan refuses INSUFFICIENT_EVIDENCE — T06 is rule-less in the frozen derivation table — and the loop terminates UNFIXABLE (the disclosed boundary, never patched)', async ()=>{
+test('L-4: a size-class agenda (metric size.width) resolves the scale-to-target-size recipe, the plan DERIVES the T06 transform (3.19 G-18), and the loop closes VERIFIED with the width restored (the 3.16 UNFIXABLE boundary was superseded — disclosed re-pin)', async ()=>{
   const g=await g3Column();
   const inference=T19.inferConstraints({ utterance:'equal width', objects:g3ObjectSpecs(g) });
   const accepted=g3Accept(g, inference.proposals);
@@ -1320,12 +1336,11 @@ test('L-4: a size-class agenda (metric size.width) resolves the scale-to-target-
     planningContext:{ constraints: accepted }, substrate:g.substrate };
   const done=CorrectionEngine.run(CorrectionEngine.start(request));
   eq(done.status, 'TERMINATED', 'terminated');
-  eq(done.terminationReason, 'UNFIXABLE', 'the honest unfixable verdict');
-  eq(done.executedAttempts, 0, 'nothing executed — no fake fix');
-  eq(g.geomParamsOf(g.objectIds[1]).width, 120, 'the drifted width is untouched');
-  const refusals=done.refusalLedger.filter(e=>e.source==='PLAN_REFUSED');
-  expect(refusals.length>=1, 'the INSUFFICIENT_EVIDENCE refusal is in the ledger');
-  eq(refusals[0].reason, 'INSUFFICIENT_EVIDENCE', 'the refusal reason');
+  eq(done.terminationReason, 'VERIFIED', 'the loop closes through the G-18 size-class arm');
+  eq(done.executedAttempts, 1, 'exactly one executed attempt');
+  const w=g.geomParamsOf(g.objectIds[1]).width;
+  expect(Math.abs(w-80)<1e-9, `the drifted width is scaled to the reference width (got ${w})`);
+  eq(done.session.currentEvaluation.status, 'PASS', 'the re-evaluation is SATISFIED');
 });
 
 test('L-5: a CONSTRAINT-category target hits the frozen zero-recipe table (CONSTRAINT -> CONSTRAINT_VIOLATION, zero recipes) — NO_CAPABILITY, honest UNFIXABLE, zero attempts', async ()=>{
@@ -1716,8 +1731,12 @@ const SURFACE_SRC=Object.fromEntries(SURFACE_FILES.map(f=>[f, surfaceSrc(f)]));
 const SURFACE_STRIPPED=Object.fromEntries(SURFACE_FILES.map(f=>[f, stripCommentsAndStrings(SURFACE_SRC[f])]));
 const TEST_FILE_SRC=readFileSync(new URL(import.meta.url), 'utf-8');
 function surfaceWordHits(f, w){ return SURFACE_STRIPPED[f].match(new RegExp('\\b'+w+'\\b','g'))||[]; }
-const TRANSACTION_JS_SHA='5ec1369b16c1294101e19d45bece4250be5fdcb1d1878eb07d6de87e5c0ea5e4';
-const CORRECTION_JS_SHA='9e31da8dff4be9b5eedea67dd2f7e425ada7e53d9338bef6e083bdeae2a00fe2';
+// 3.19 re-pin (spec §57): the 3.15-era byte-identity freezes are superseded by the
+// B-approved G-6/G-18/G-17 fixes; the scans' INTENT (no History DAG vocabulary, no
+// builder nesting) remains satisfied. Shas refreshed to the D-accepted states
+// (transaction.js post-G-6, correction.js post-G-18/G-17).
+const TRANSACTION_JS_SHA='1b7693dfa3e3cd417046202af91c2ab4df729d886851bdb0c014a9c51c99800e';
+const CORRECTION_JS_SHA='4b4f19721e58b9d3054196021590b5238e534886ecc97676b0aee132b0954b7f';
 function shaOfSrc(src){ return createHash('sha256').update(src).digest('hex'); }
 
 test('M-10: FINAL SCAN — no fetch / HTTP / network anywhere in the 3.16 surface (stripped code bodies of all four production files + the test file imports only relative or declared node: builtins)', ()=>{

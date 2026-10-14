@@ -1,0 +1,30 @@
+✗ G5-1: T10 legacy sceneGraph-direct branch constructs the group honestly — the returned groupNodeId resolves to a real node and the members are reparented (G-5): G-5 RED: a success:true groupNodeId must resolve to a real scene node — the legacy branch returned a FABRICATED dangling id (not findable via sceneGraph.findNode)
+Error: G-5 RED: a success:true groupNodeId must resolve to a real scene node — the legacy branch returned a FABRICATED dangling id (not findable via sceneGraph.findNode)
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:41:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:99:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:40:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:92:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ G5-2: T10 legacy branch failure arm is an HONEST failure — when group construction throws, the result is success:false with structured errors, NEVER success:true carrying an id (G-5): G-5 RED: the legacy failure arm returned success:true with a fabricated dangling groupNodeId — an honest failure is required
+Error: G-5 RED: the legacy failure arm returned success:true with a fabricated dangling groupNodeId — an honest failure is required
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:41:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:114:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:40:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:107:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✗ G10-1: no-substrate context — when T04 throws, the DSL rollback RETAINS the created objects and records an honest EXECUTION_FAILED error; no silent out-of-substrate store mutation (G-10): G-10 RED: created object A must be RETAINED when no substrate channel is available — the legacy fallback raw-deleted it silently from objectStore outside the substrate
+Error: G-10 RED: created object A must be RETAINED when no substrate channel is available — the legacy fallback raw-deleted it silently from objectStore outside the substrate
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:41:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:131:3
+    at async Promise.all (index 0)
+✗ G10-2: standing-workingCopy substrate context — when T04 throws, the rollback deletes through workingCopy.deleteObject (the T04 substrate channel, tools.js:302) and the committed objectStore is NOT directly mutated (G-10): G-10 RED: the committed objectStore must NOT be mutated directly — the legacy fallback raw-deleted oidA from the committed store outside the substrate
+Error: G-10 RED: the committed objectStore must NOT be mutated directly — the legacy fallback raw-deleted oidA from the committed store outside the substrate
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:41:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:158:3
+    at async Promise.all (index 1)
+
+Tests: 4 total, 0 passed, 4 failed

@@ -1,0 +1,15 @@
+✓ no direct Store.write
+✓ no direct GeometryStore.write
+✓ no direct SceneGraph mutation
+✓ no History mutation
+✓ no Renderer mutation
+
+=== Input Abstraction ===
+✓ PointerInput abstract
+✓ ViewportTransform
+
+=== Overlay ===
+✓ overlay transient
+✓ selection bounds handles
+
+Tests: 55 total, 55 passed, 0 failed

@@ -1,0 +1,35 @@
+✓ G5-1: T10 legacy sceneGraph-direct branch constructs the group honestly — the returned groupNodeId resolves to a real node and the members are reparented (G-5)
+✓ G5-2: T10 legacy branch failure arm is an HONEST failure — when group construction throws, the result is success:false with structured errors, NEVER success:true carrying an id (G-5)
+✗ G5-3: T10 terminal fallback arm (context with NEITHER workingCopy NOR sceneGraph) is an HONEST failure — no fabricated success:true groupNodeId under any path (G-5 terminal arm, C1): G-5 terminal RED: the terminal fallback returned success:true with a FABRICATED dangling groupNodeId — an honest failure is required
+Error: G-5 terminal RED: the terminal fallback returned success:true with a FABRICATED dangling groupNodeId — an honest failure is required
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:41:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:204:3
+    at test (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:40:48)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:196:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+✓ G10-1: no-substrate context — when T04 throws, the DSL rollback RETAINS the created objects and records an honest EXECUTION_FAILED error; no silent out-of-substrate store mutation (G-10)
+✓ G10-2: standing-workingCopy substrate context — when T04 throws, the rollback deletes through workingCopy.deleteObject (the T04 substrate channel, tools.js:302) and the committed objectStore is NOT directly mutated (G-10)
+✗ G10-3: tool-failed arm, no-substrate context — when the executing tool fails and T04 also fails, the rollback RETAINS the created objects and records honest EXECUTION_FAILED errors; no silent out-of-substrate store mutation (G-10 sibling, C1): G-10 sibling RED: created object A must be RETAINED — the legacy tool-failed arm raw-deleted it from objectStore outside the substrate after T04 failed
+Error: G-10 sibling RED: created object A must be RETAINED — the legacy tool-failed arm raw-deleted it from objectStore outside the substrate after T04 failed
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:41:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:254:3
+    at async Promise.all (index 2)
+✗ G10-4: tool-failed arm, standing-workingCopy substrate context — the rollback deletes through workingCopy.deleteObject (the T04 substrate channel, tools.js:302) and the committed objectStore is NOT directly mutated (G-10 sibling, C1): G-10 sibling RED: the committed objectStore must NOT be mutated directly — the legacy arm raw-deleted oidA from the committed store outside the substrate
+Error: G-10 sibling RED: the committed objectStore must NOT be mutated directly — the legacy arm raw-deleted oidA from the committed store outside the substrate
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:41:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:270:3
+    at async Promise.all (index 3)
+✗ G10-5: exception arm, no-substrate context — when the executing tool throws and T04 also fails, the rollback RETAINS the created objects and records honest EXECUTION_FAILED errors; no silent out-of-substrate store mutation (G-10 sibling, C1): G-10 sibling RED: created object A must be RETAINED — the legacy exception arm raw-deleted it from objectStore outside the substrate after T04 failed
+Error: G-10 sibling RED: created object A must be RETAINED — the legacy exception arm raw-deleted it from objectStore outside the substrate after T04 failed
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:41:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:287:3
+    at async Promise.all (index 4)
+✗ G10-6: exception arm, standing-workingCopy substrate context — the rollback deletes through workingCopy.deleteObject (the T04 substrate channel, tools.js:302) and the committed objectStore is NOT directly mutated (G-10 sibling, C1): G-10 sibling RED: the committed objectStore must NOT be mutated directly — the legacy arm raw-deleted oidA from the committed store outside the substrate
+Error: G-10 sibling RED: the committed objectStore must NOT be mutated directly — the legacy arm raw-deleted oidA from the committed store outside the substrate
+    at expect (file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:41:38)
+    at file:///home/z/my-project/ai-vector-engine/tests/phase3.19.test.mjs:303:3
+    at async Promise.all (index 5)
+
+Tests: 9 total, 4 passed, 5 failed
